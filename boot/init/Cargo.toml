@@ -1,0 +1,12 @@
+[package]
+name = "blackwall-init"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Black Wall Core init daemon — PID 1 userspace process manager"
+
+[[bin]]
+name = "bwinit"
+path = "src/main.rs"
+
+[dependencies]

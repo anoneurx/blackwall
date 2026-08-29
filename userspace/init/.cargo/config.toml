@@ -1,0 +1,12 @@
+# Build configuration for the init userspace binary.
+# We use a custom linker script to produce a flat, static ELF at 0x400000.
+
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "link-arg=--static",
+    "-C", "link-arg=--no-dynamic-linker",
+    "-C", "relocation-model=static",
+]

@@ -1,0 +1,12 @@
+[package]
+name = "bwssh"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "bwssh — Black Wall Core SSH service wrapper"
+
+[[bin]]
+name = "bwssh"
+path = "src/main.rs"
+
+[dependencies]

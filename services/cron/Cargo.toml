@@ -1,0 +1,13 @@
+[package]
+name = "bwcron"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "bwcron — Black Wall Core cron daemon"
+
+[[bin]]
+name = "bwcron"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"

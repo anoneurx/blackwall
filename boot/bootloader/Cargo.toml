@@ -1,0 +1,14 @@
+[package]
+name = "blackwall-bootloader"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "blackwall-bootloader"
+path = "src/main.rs"
+
+[dependencies]
+blackwall-kernel = { path = "../../kernel" }
+blackwall-shared = { path = "../../shared/shared" }
+uefi = "0.30"

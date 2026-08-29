@@ -1,0 +1,26 @@
+[package]
+name = "bw-pkg"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "bw-pkg — Black Wall .anxpkg package builder and repository index generator"
+
+[[bin]]
+name = "bw-pkg"
+path = "src/main.rs"
+
+[dependencies]
+anyhow    = "1"
+clap      = { version = "4",    features = ["derive"] }
+serde     = { version = "1",    features = ["derive"] }
+toml      = "0.8"
+sha2      = "0.10"
+tar       = "0.4"
+zstd      = "0.13"
+flate2    = "1"
+bzip2     = "0.5"
+xz2       = "0.1"
+walkdir   = "2"
+zip       = "2"
+reqwest   = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+colored   = "2"

@@ -1,0 +1,28 @@
+[package]
+name = "anx"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "anx — Black Wall Core native package manager"
+
+[[bin]]
+name = "anx"
+path = "src/main.rs"
+
+[dependencies]
+clap      = { version = "4",    features = ["derive"] }
+serde     = { version = "1",    features = ["derive"] }
+toml      = "0.8"
+sha2      = "0.10"
+reqwest   = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+tar       = "0.4"
+zstd      = "0.13"
+anyhow    = "1"
+indicatif = "0.17"
+colored   = "2"
+dirs      = "5"
+chrono    = { version = "0.4",  features = ["serde"] }
+
+[features]
+default    = []
+gpg-verify = []   # Enable GPG via system gpg binary — no C binding required

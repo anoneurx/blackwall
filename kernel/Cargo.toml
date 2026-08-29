@@ -1,0 +1,19 @@
+[package]
+name = "blackwall-kernel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "blackwall-kernel"
+path = "src/main.rs"
+
+[dependencies]
+blackwall-shared = { path = "../shared/shared" }
+blackwall-net    = { path = "../net" }
+blackwall-fs     = { path = "../fs" }
+linked_list_allocator = "0.10"
+uefi = "0.30"

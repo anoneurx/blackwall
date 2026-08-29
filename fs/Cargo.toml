@@ -1,0 +1,12 @@
+[package]
+name = "blackwall-fs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Intentionally kept dependency-free — all allocator types come from the
+# kernel's global allocator via the `extern crate alloc` mechanism.

@@ -1,0 +1,11 @@
+[package]
+name = "blackwall-net"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# No external dependencies to keep compile speeds and size minimal

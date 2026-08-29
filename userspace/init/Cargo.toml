@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "init"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blackwall-shared = { path = "../../shared/shared" }
+
+[profile.dev]
+panic = "abort"
+lto = true
+opt-level = 0
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = 3

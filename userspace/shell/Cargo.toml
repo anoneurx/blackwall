@@ -1,0 +1,14 @@
+[package]
+name = "bwsh"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "bwsh — Black Wall Core shell"
+
+[[bin]]
+name = "bwsh"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+colored = "2"

@@ -1,0 +1,11 @@
+[package]
+name = "blackwall-runner"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "blackwall-runner"
+path = "src/main.rs"
+
+[dependencies]

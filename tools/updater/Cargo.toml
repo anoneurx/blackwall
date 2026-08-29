@@ -1,0 +1,16 @@
+[package]
+name = "anxd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "anxd — Black Wall Core automatic update daemon"
+
+[[bin]]
+name = "anxd"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,57 @@
+[workspace]
+members = [
+    # ── Kernel / Boot ─────────────────────────────────────────────────────────
+    "boot/bootloader",
+    "kernel",
+    "shared/shared",
+    "net",
+    "fs",
+
+    # ── Package Manager ───────────────────────────────────────────────────────
+    "pkg/anx",                    # anx CLI
+    "pkg/server",                 # anx-repo-server
+
+    # ── System Services ───────────────────────────────────────────────────────
+    "boot/init",                  # bwinit — PID 1 init daemon
+    "services/ssh",               # bwssh — SSH service wrapper
+    "services/cron",              # bwcron — cron daemon
+    "services/snapshot",          # bwsnap — snapshot manager
+    "services/backup",            # bwbackup — backup manager
+
+    # ── Tools ─────────────────────────────────────────────────────────────────
+    "tools/runner",               # QEMU runner (dev tool)
+    "tools/updater",              # anxd — auto update daemon
+    "tools/firewall",             # bwfw — firewall CLI
+    "tools/iso-builder",          # bw-iso-builder — ISO assembly tool
+    "tools/package-builder",      # bw-pkg — .anxpkg package builder
+
+    # ── Userspace ─────────────────────────────────────────────────────────────
+    "userspace/shell",             # bwsh — interactive shell
+    "userspace/coreutils",         # bwcoreutils — ls, cat, cp, mv, rm, ...
+    "userspace/login",             # bwlogin — login process
+]
+# userspace/init is NOT a workspace member — it must be compiled separately
+# for x86_64-unknown-none (bare metal). Build it first with:
+#   cd userspace/init && cargo build --target x86_64-unknown-none
+# The resulting ELF is embedded into the kernel via include_bytes!.
+default-members = [
+    "boot/bootloader",
+    "kernel",
+    "shared/shared",
+    "net",
+    "fs",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = 3

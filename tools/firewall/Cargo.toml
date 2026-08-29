@@ -1,0 +1,17 @@
+[package]
+name = "bwfw"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "bwfw — Black Wall Core firewall CLI"
+
+[[bin]]
+name = "bwfw"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+colored = "2"
+anyhow = "1"
