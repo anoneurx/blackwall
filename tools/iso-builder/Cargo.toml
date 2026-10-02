@@ -10,5 +10,7 @@ name = "bw-iso-builder"
 path = "src/main.rs"
 
 [dependencies]
-anyhow  = "1"
-colored = "2"
+anyhow   = "1"
+colored  = "2"
+isobemak = "0.4"
+sha2     = "0.10"

@@ -1,31 +1,15 @@
-//! # bw-iso-builder — Black Wall Core ISO Image Builder
-//!
-//! Orchestrates the assembly of a bootable Black Wall Core ISO image.
-//!
-//! This tool:
-//! 1. Validates required binaries exist in the build output
-//! 2. Assembles the ISO filesystem tree
-//! 3. Writes GRUB2 configuration
-//! 4. Calls `grub-mkrescue` (or `xorriso`) to produce the final ISO
-//! 5. Generates SHA256 checksum file
-//!
-//! Usage:
-//!   bw-iso-builder [--release] [--output <path>] [--root <workspace>]
-
 use anyhow::{Context, Result};
 use colored::Colorize;
+use isobemak::{build_iso, BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
-
-// ─── Config ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
 struct Config {
     workspace_root: PathBuf,
     profile: &'static str,
     output_iso: PathBuf,
-    iso_staging: PathBuf,
 }
 
 impl Config {
@@ -39,11 +23,11 @@ impl Config {
         while i < args.len() {
             match args[i].as_str() {
                 "--release" => release = true,
-                "--output" => {
+                "--output" | "-o" => {
                     output = args.get(i + 1).cloned();
                     i += 1;
                 }
-                "--root" => {
+                "--root" | "-r" => {
                     root = args.get(i + 1).cloned();
                     i += 1;
                 }
@@ -60,11 +44,9 @@ impl Config {
 
         let output_iso = output
             .map(PathBuf::from)
-            .unwrap_or_else(|| workspace_root.join("dist").join("blackwall-server-v2.0.iso"));
+            .unwrap_or_else(|| workspace_root.join("dist").join("blackwall-server-v0.1.iso"));
 
-        let iso_staging = workspace_root.join("_isobuild");
-
-        Config { workspace_root, profile, output_iso, iso_staging }
+        Config { workspace_root, profile, output_iso }
     }
 
     fn target_dir(&self) -> PathBuf {
@@ -76,126 +58,99 @@ impl Config {
     }
 }
 
-// ─── Steps ────────────────────────────────────────────────────────────────────
-
 fn step(n: u8, total: u8, msg: &str) {
     println!("[{}/{}] {}", n, total, msg.bold());
 }
 
 fn ok(msg: &str) {
-    println!("       {} {}", "✓".bright_green(), msg);
+    println!("       {} {}", "+".bright_green(), msg);
 }
 
 fn warn(msg: &str) {
     println!("       {} {}", "!".bright_yellow(), msg);
 }
 
-/// Check that external tools are available.
-fn check_deps() -> Result<()> {
-    for tool in ["grub-mkrescue", "xorriso", "sha256sum"] {
-        let found =
-            Command::new("which").arg(tool).output().map(|o| o.status.success()).unwrap_or(false);
-        if !found {
-            anyhow::bail!(
-                "Required tool '{}' not found.\n  Install with: sudo apt install {}",
-                tool,
-                tool
-            );
-        }
-    }
-    Ok(())
-}
+fn collect_files(cfg: &Config) -> Vec<IsoImageFile> {
+    let mut files = Vec::new();
+    let target = cfg.target_dir();
 
-/// Clean and recreate the ISO staging tree.
-fn setup_staging(cfg: &Config) -> Result<()> {
-    if cfg.iso_staging.exists() {
-        fs::remove_dir_all(&cfg.iso_staging).context("Failed to clean staging dir")?;
-    }
-
-    for dir in ["boot/grub", "EFI/BOOT", "blackwall/bin", "blackwall/lib", "blackwall/etc"] {
-        fs::create_dir_all(cfg.iso_staging.join(dir))
-            .with_context(|| format!("Failed to create staging/{}", dir))?;
-    }
-    ok("Staging tree created");
-    Ok(())
-}
-
-/// Copy compiled artifacts into the staging tree.
-fn stage_artifacts(cfg: &Config) -> Result<()> {
-    let bins = [
-        // (source relative to target dir, dest in ISO tree)
-        ("blackwall-bootloader.efi", "EFI/BOOT/BOOTX64.EFI"),
+    let placed: &[(&str, &str)] = &[
+        ("bwinit", "blackwall/bin/bwinit"),
+        ("anx", "blackwall/bin/anx"),
+        ("anxd", "blackwall/bin/anxd"),
+        ("bwsh", "blackwall/bin/bwsh"),
+        ("bwlogin", "blackwall/bin/bwlogin"),
+        ("bwfw", "blackwall/bin/bwfw"),
+        ("bwcron", "blackwall/bin/bwcron"),
+        ("bwssh", "blackwall/bin/bwssh"),
+        ("bwsnap", "blackwall/bin/bwsnap"),
+        ("bwbackup", "blackwall/bin/bwbackup"),
+        ("bw-pkg", "blackwall/bin/bw-pkg"),
+        ("anx-repo-server", "blackwall/bin/anx-repo-server"),
+        ("blackwall-runner", "blackwall/bin/blackwall-runner"),
     ];
 
-    for (src_name, dest_rel) in &bins {
-        let src = cfg.uefi_target_dir().join(src_name);
+    for (bin, dest) in placed {
+        let src = target.join(bin);
         if src.exists() {
-            let dest = cfg.iso_staging.join(dest_rel);
-            fs::copy(&src, &dest).with_context(|| format!("Failed to copy {}", src_name))?;
-            ok(&format!("Staged {} → {}", src_name, dest_rel));
-        } else {
-            warn(&format!("{} not found (may be a host build) — skipping", src_name));
+            files.push(IsoImageFile { source: src, destination: dest.to_string() });
+            ok(&format!("{} -> {}", bin, dest));
         }
     }
 
-    // Installer binary.
-    let installer = cfg.target_dir().join("blackwall-installer");
-    if installer.exists() {
-        fs::copy(&installer, cfg.iso_staging.join("blackwall/bin/installer"))?;
-        ok("Staged installer");
-    }
-
-    // Service binaries.
-    let extra_bins = [
-        "bw-api",
-        "bwmonitor",
-        "bwsnap",
-        "bwbackup",
-        "bwcluster",
-        "bwctl",
-        "bwfw",
-        "anxd",
-        "anx",
-        "bwsh",
+    let coreutils: &[&str] = &[
+        "ls", "cat", "cp", "mv", "rm", "mkdir", "rmdir", "touch", "chmod", "chown", "echo", "find",
+        "grep", "head", "tail", "wc", "sort", "uniq", "ps", "kill", "id", "whoami", "hostname",
+        "date", "df", "du", "uname", "pwd",
     ];
-    for bin in &extra_bins {
-        let src = cfg.target_dir().join(bin);
+    for cmd in coreutils {
+        let src = target.join(cmd);
         if src.exists() {
-            fs::copy(&src, cfg.iso_staging.join(format!("blackwall/bin/{}", bin)))?;
-            ok(&format!("Staged {}", bin));
+            files.push(IsoImageFile { source: src, destination: format!("blackwall/bin/{}", cmd) });
         }
     }
+    ok("coreutils (28 tools)");
 
-    // Systemd service files.
-    let svc_dir = cfg.workspace_root.join("installer").join("systemd");
-    if svc_dir.exists() {
-        let dest_dir = cfg.iso_staging.join("blackwall/etc/systemd");
-        fs::create_dir_all(&dest_dir)?;
-        for entry in fs::read_dir(&svc_dir)? {
-            let entry = entry?;
-            let file_name = entry.file_name();
-            fs::copy(entry.path(), dest_dir.join(&file_name))?;
-            ok(&format!("Staged systemd/{}", file_name.to_string_lossy()));
-        }
+    let init_src = cfg
+        .workspace_root
+        .join("userspace/init/target/x86_64-unknown-none")
+        .join(cfg.profile)
+        .join("init");
+    if init_src.exists() {
+        files
+            .push(IsoImageFile { source: init_src, destination: "blackwall/bin/init".to_string() });
+        ok("userspace init -> blackwall/bin/init");
     }
 
-    // Systemd units from the workspace (boot/init provides bwinit).
-    let bwinit = cfg.target_dir().join("bwinit");
-    if bwinit.exists() {
-        fs::copy(&bwinit, cfg.iso_staging.join("blackwall/bin/bwinit"))?;
-        ok("Staged bwinit");
-    }
-
-    Ok(())
+    files
 }
 
-/// Write the GRUB2 boot configuration.
-fn write_grub_config(cfg: &Config) -> Result<()> {
-    let grub_cfg = r#"# Black Wall Core — GRUB2 Boot Configuration
-set timeout=5
+fn build(cfg: &Config) -> Result<()> {
+    let bootloader = cfg.uefi_target_dir().join("blackwall-bootloader.efi");
+    let kernel = cfg.uefi_target_dir().join("blackwall-kernel.efi");
+
+    if !bootloader.exists() {
+        anyhow::bail!(
+            "UEFI bootloader not found at {}\n  Build with: cargo build -p blackwall-bootloader --target x86_64-unknown-uefi",
+            bootloader.display()
+        );
+    }
+    if !kernel.exists() {
+        anyhow::bail!(
+            "UEFI kernel not found at {}\n  Build with: cargo build -p blackwall-kernel --target x86_64-unknown-uefi",
+            kernel.display()
+        );
+    }
+
+    ok(&format!("Bootloader: {}", bootloader.display()));
+    ok(&format!("Kernel:     {}", kernel.display()));
+
+    let files = collect_files(cfg);
+
+    let grub_cfg = r#"set timeout=5
 set default=0
 
-menuentry "Black Wall Core v2.0" {
+menuentry "Black Wall Core v0.1" {
     echo "Loading Black Wall Core..."
     insmod all_video
     terminal_output console
@@ -203,79 +158,71 @@ menuentry "Black Wall Core v2.0" {
     boot
 }
 
-menuentry "Black Wall Core v2.0 (Safe Mode)" {
-    echo "Loading in safe mode..."
-    chainloader /EFI/BOOT/BOOTX64.EFI
-    set bwcmdline="single"
-    boot
-}
-
-menuentry "Black Wall Core v2.0 (Recovery Console)" {
+menuentry "Black Wall Core v0.1 (Recovery)" {
     echo "Loading Recovery Console..."
     chainloader /EFI/BOOT/BOOTX64.EFI
-    set bwcmdline="recovery"
     boot
 }
 "#;
-    let path = cfg.iso_staging.join("boot/grub/grub.cfg");
-    fs::write(&path, grub_cfg).context("Failed to write grub.cfg")?;
-    ok("Written grub.cfg");
-    Ok(())
-}
 
-/// Call grub-mkrescue to produce the ISO.
-fn build_iso(cfg: &Config) -> Result<()> {
-    // Ensure output directory exists.
+    let mut iso_files = files;
+
+    iso_files.push(IsoImageFile {
+        source: bootloader.clone(),
+        destination: "EFI/BOOT/BOOTX64.EFI".to_string(),
+    });
+    iso_files.push(IsoImageFile {
+        source: kernel.clone(),
+        destination: "EFI/BLACKWALL/KERNEL.EFI".to_string(),
+    });
+
+    let iso_image = IsoImage {
+        volume_id: Some("BLACKWALL".to_string()),
+        files: iso_files,
+        boot_info: BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(UefiBootInfo {
+                boot_image: bootloader,
+                kernel_image: kernel,
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: Some(grub_cfg.to_string()),
+            }),
+        },
+        layout_profile: IsoLayoutProfile::default(),
+    };
+
     if let Some(parent) = cfg.output_iso.parent() {
         fs::create_dir_all(parent).context("Failed to create output directory")?;
     }
-
-    let status = Command::new("grub-mkrescue")
-        .arg(format!("--output={}", cfg.output_iso.display()))
-        .arg(cfg.iso_staging.display().to_string())
-        .arg("--")
-        .args(["-volid", "BLACKWALL_2_0"])
-        .status()
-        .context("Failed to execute grub-mkrescue")?;
-
-    if !status.success() {
-        anyhow::bail!("grub-mkrescue failed with status {:?}", status.code());
+    if cfg.output_iso.exists() {
+        fs::remove_file(&cfg.output_iso)?;
     }
 
-    if !cfg.output_iso.exists() {
-        anyhow::bail!(
-            "grub-mkrescue succeeded but ISO file not found at {}",
-            cfg.output_iso.display()
-        );
-    }
+    let (iso_path, _temp_fat, _iso_file, _fat_size) =
+        build_iso(&cfg.output_iso, &iso_image, false).context("Failed to create ISO image")?;
 
-    let meta = fs::metadata(&cfg.output_iso)?;
-    ok(&format!("ISO created ({:.1} MB)", meta.len() as f64 / (1024.0 * 1024.0)));
+    let meta = fs::metadata(&iso_path)?;
+    ok(&format!(
+        "ISO created: {} ({:.1} MB)",
+        iso_path.display(),
+        meta.len() as f64 / (1024.0 * 1024.0)
+    ));
+
+    let mut hasher = Sha256::new();
+    hasher.update(fs::read(&iso_path)?);
+    let hash = format!("{:x}", hasher.finalize());
+    let checksum_path = iso_path.with_extension("sha256");
+    fs::write(&checksum_path, format!("{}  {}\n", hash, iso_path.display()))?;
+    ok(&format!("SHA256: {}", hash));
+
     Ok(())
 }
-
-/// Compute SHA256 and write a sidecar file.
-fn write_checksum(cfg: &Config) -> Result<()> {
-    let output = Command::new("sha256sum")
-        .arg(cfg.output_iso.display().to_string())
-        .output()
-        .context("Failed to run sha256sum")?;
-
-    let hash_line = String::from_utf8_lossy(&output.stdout).to_string();
-    let checksum_path = cfg.output_iso.with_extension("sha256");
-    fs::write(&checksum_path, &hash_line).context("Failed to write checksum file")?;
-
-    let hash = hash_line.split_whitespace().next().unwrap_or("?");
-    ok(&format!("SHA256: {}", hash.bright_cyan()));
-    Ok(())
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
     println!();
     println!("  {} {}", "Black Wall Core".bold().bright_cyan(), "ISO Builder".bold());
-    println!("  {}", "────────────────────────────────────────".dimmed());
+    println!("  {}", "-".repeat(40).dimmed());
     println!();
 
     let cfg = Config::from_args();
@@ -284,29 +231,45 @@ fn main() -> Result<()> {
     println!("  Output  : {}", cfg.output_iso.display());
     println!();
 
-    const STEPS: u8 = 5;
+    const STEPS: u8 = 3;
 
-    step(1, STEPS, "Checking dependencies...");
-    check_deps()?;
+    step(1, STEPS, "Validating build artifacts...");
+    let uefi = cfg.uefi_target_dir();
+    let target = cfg.target_dir();
+    let mut missing = false;
+    for name in &["blackwall-bootloader.efi", "blackwall-kernel.efi"] {
+        if uefi.join(name).exists() {
+            ok(&format!("{} found", name));
+        } else {
+            warn(&format!("{} NOT FOUND", name));
+            missing = true;
+        }
+    }
+    if missing {
+        println!();
+        anyhow::bail!("Missing UEFI artifacts. Build first:");
+    }
 
-    step(2, STEPS, "Setting up staging tree...");
-    setup_staging(&cfg)?;
+    step(2, STEPS, "Assembling ISO filesystem...");
+    let file_count = fs::read_dir(&target)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .count()
+        })
+        .unwrap_or(0);
+    ok(&format!("{} binaries in target directory", file_count));
 
-    step(3, STEPS, "Staging artifacts...");
-    stage_artifacts(&cfg)?;
-    write_grub_config(&cfg)?;
-
-    step(4, STEPS, "Building ISO image...");
-    build_iso(&cfg)?;
-
-    step(5, STEPS, "Writing checksum...");
-    write_checksum(&cfg)?;
+    step(3, STEPS, "Building ISO image...");
+    build(&cfg)?;
 
     println!();
-    println!("  {} Build complete!", "✓".bold().bright_green());
+    println!("  {} ISO ready for installation!", "Done.".bold().bright_green());
     println!("  {}", cfg.output_iso.display().to_string().bright_cyan());
     println!();
-    println!("  Test with: scripts/run-qemu.sh");
+    println!("  To test in QEMU:");
+    println!("    qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd \\");
+    println!("      -cdrom {} -m 256M -serial stdio -display none", cfg.output_iso.display());
     println!();
 
     Ok(())
