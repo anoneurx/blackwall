@@ -1,10 +1,37 @@
-# Black Wall Core
+# Black Wall
 
 A compact, self-hostable operating system foundation for building server
 appliances and embedded/gateway systems. Black Wall Core is the adaptable,
 open-core OS layer extracted from the Black Wall Core product: it provides
 the kernel, boot, filesystem, networking, drivers, and a small userland, free
 from the proprietary cloud, API, and GUI layers.
+
+## Keywords
+
+`operating system`, `os development`, `rust osdev`, `kernel development`,
+`x86_64 kernel`, `monolithic kernel`, `UEFI bootloader`, `bare metal rust`,
+`systems programming`, `self-hosted operating system`, `privacy-first os`,
+`embedded operating system`, `homebrew OS`, `filesystem`, `network stack`,
+`QEMU`, `package manager`, `secure enclaves`
+
+## Why
+
+Black Wall Core is a from-scratch general-purpose operating system written in
+Rust, built for people who want to understand or modify every layer of the
+stack instead of configuring someone else's. It targets `x86_64` with a UEFI
+boot chain and is developed against QEMU, so you can build an ISO and boot it
+without physical hardware.
+
+Use it as a base for:
+
+- **Server appliances and gateways** — the userland already ships an SSH
+  service, cron, a snapshot manager, a backup manager, and a firewall.
+- **Self-hosted infrastructure** — no cloud, no external API, no telemetry.
+  Audit the whole system in one repository.
+- **Privacy-first deployments** — network stack and access control are part of
+  the kernel, not bolted on afterwards.
+- **Learning and research** — a readable reference for kernel internals:
+  memory management, scheduling, IPC, SMP, syscalls, containers, and drivers.
 
 ## What's included
 
@@ -73,6 +100,46 @@ cargo test --workspace
 
 The kernel and bootloader are bare-metal and must be cross-compiled (host
 tests cover the library, networking, filesystem, tools and services crates).
+
+## FAQ
+
+**What is Black Wall Core?**
+A compact, self-hostable operating system foundation in Rust, providing the
+kernel, bootloader, filesystem, network stack, drivers, userland, and services
+for building server appliances and embedded gateways.
+
+**Which architecture does it target?**
+`x86_64`, booted through UEFI. The bootloader and kernel cross-compile to
+`x86_64-unknown-uefi`, and the bare-metal userland `init` to
+`x86_64-unknown-none`.
+
+**Is it a microkernel or a monolithic kernel?**
+Monolithic. The kernel is a single crate whose subsystems are internal
+modules — memory, process, scheduler, IPC, sync, syscall, security, SMP,
+containers, drivers, fs, and net — all running in the same address space.
+
+**What language is it written in?**
+Rust, throughout the kernel, bootloader, userland, services, tools, and
+package manager.
+
+**Does it need external services or an API?**
+No. It is designed to run fully self-hosted with no cloud dependency, and
+external-API telemetry was removed when the open-core layer was extracted.
+
+**Can I run it without dedicated hardware?**
+Yes. `tools/iso-builder` assembles a bootable ISO and `tools/runner` boots it
+in `qemu-system-x86_64`.
+
+**What userland programs are included?**
+`bwsh` (shell), `bwlogin` (login), bare-metal `init` (PID 1), and around thirty
+coreutils including `ls`, `cat`, `cp`, `mv`, and `rm`.
+
+**Does it have a package manager?**
+Yes — `anx`, with `anx-repo-server` for hosting a local repository and
+`tools/package-builder` to produce `.anxpkg` packages.
+
+**What license is it under?**
+MIT.
 
 ## License
 
