@@ -102,14 +102,44 @@ pub mod syscall {
     pub const SYS_WRITE: u64 = 1;
     pub const SYS_OPEN: u64 = 2;
     pub const SYS_CLOSE: u64 = 3;
+    pub const SYS_STAT: u64 = 4;
+    pub const SYS_LSEEK: u64 = 8;
     pub const SYS_YIELD: u64 = 24;
     pub const SYS_SLEEP: u64 = 35;
     pub const SYS_GETPID: u64 = 39;
     pub const SYS_FORK: u64 = 57;
     pub const SYS_EXECVE: u64 = 59;
     pub const SYS_EXIT: u64 = 60;
+    pub const SYS_READDIR: u64 = 78;
+    pub const SYS_MKDIR: u64 = 83;
+    pub const SYS_RMDIR: u64 = 84;
+    pub const SYS_UNLINK: u64 = 87;
     pub const SYS_GETPPID: u64 = 110;
+
+    // open(2) flags — Linux-compatible bit values.
+    pub const O_RDONLY: u64 = 0;
+    pub const O_WRONLY: u64 = 1;
+    pub const O_RDWR: u64 = 2;
+    pub const O_CREAT: u64 = 0o100;
+    pub const O_TRUNC: u64 = 0o1000;
+    pub const O_APPEND: u64 = 0o2000;
+
+    // lseek(2) whence values.
+    pub const SEEK_SET: u64 = 0;
+    pub const SEEK_CUR: u64 = 1;
+    pub const SEEK_END: u64 = 2;
+
+    // readdir(2) record layout (simplified binary dirent):
+    //   [u8 type][u8 name_len][u8 name…] repeated.
+    pub const DT_UNKNOWN: u8 = 0;
+    pub const DT_REG: u8 = 1;
+    pub const DT_DIR: u8 = 2;
+    pub const DT_SYMLINK: u8 = 3;
 
     // Error codes
     pub const ENOSYS: i64 = -38;
+    pub const ENOENT: i64 = -2;
+    pub const EEXIST: i64 = -17;
+    pub const ENOTDIR: i64 = -20;
+    pub const ENOTSUP: i64 = -95;
 }

@@ -223,6 +223,15 @@ blackwall_trap_keyboard:
     call blackwall_trap_keyboard_rust
     RESTORE_REGS
 
+    // ── Local APIC spurious interrupt (vector 0xFF) ──────────────────────
+    // The LAPIC delivers this whenever a pending IRQ was too low in priority
+    // to be handled; it is NOT an actual interrupt, must receive no EOI and
+    // is simply iretq'd back.  The IDT gate for it MUST exist, otherwise the
+    // delivery raises a #GP against the missing gate.
+    .global blackwall_trap_spurious
+blackwall_trap_spurious:
+    iretq
+
     // ── Voluntary context switch from ring 0 ─────────────────────────────
     // In long mode `IRETQ` always pops RSP+SS (mirroring `do_interrupt64`,
     // which always pushes them), so a ring-0 yield must present the full
@@ -288,6 +297,8 @@ extern "C" {
     /// Hardware IRQ stubs installed into the IDT.
     pub fn blackwall_trap_timer();
     pub fn blackwall_trap_keyboard();
+    /// Local APIC spurious interrupt (vector 0xFF).
+    pub fn blackwall_trap_spurious();
     /// Voluntarily give the CPU up; called from ring 0 like a normal function.
     pub fn blackwall_trap_yield();
     /// `syscall` instruction target (installed into the LSTAR MSR).

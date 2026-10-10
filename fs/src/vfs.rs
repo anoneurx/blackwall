@@ -178,4 +178,78 @@ impl VfsManager {
         buf.truncate(n);
         Ok(buf)
     }
+
+    /// Split `path` into its parent directory path and final component.
+    /// `/foo` → (`/`, `foo`); `/mnt/dir/file` → (`/mnt/dir`, `file`).
+    /// Returns `None` for the root itself.
+    pub fn split_parent(&self, path: &str) -> Option<(String, String)> {
+        if !path.starts_with('/') {
+            return None;
+        }
+        let trimmed = path.trim_end_matches('/');
+        if trimmed.is_empty() {
+            return None;
+        }
+        let idx = trimmed.rfind('/')?;
+        if idx == 0 {
+            Some((String::from("/"), String::from(&trimmed[1..])))
+        } else {
+            Some((String::from(&trimmed[..idx]), String::from(&trimmed[idx + 1..])))
+        }
+    }
+
+    /// Create a new empty file at `path`. Fails with [`VfsError::AlreadyExists`]
+    /// if a node with that name already exists.
+    pub fn create_file(&self, path: &str) -> Result<u64, VfsError> {
+        let (parent_path, name) = self.split_parent(path).ok_or(VfsError::InvalidPath)?;
+        let parent = self.resolve_path(&parent_path)?;
+        if parent.vtype != VnodeType::Directory {
+            return Err(VfsError::NotADirectory);
+        }
+        parent.fs.create(parent.inode, &name)
+    }
+
+    /// Create a new directory at `path`.
+    pub fn mkdir(&self, path: &str) -> Result<u64, VfsError> {
+        let (parent_path, name) = self.split_parent(path).ok_or(VfsError::InvalidPath)?;
+        let parent = self.resolve_path(&parent_path)?;
+        if parent.vtype != VnodeType::Directory {
+            return Err(VfsError::NotADirectory);
+        }
+        parent.fs.mkdir(parent.inode, &name)
+    }
+
+    /// Remove a file at `path`. Fails if the node is a directory.
+    pub fn unlink(&self, path: &str) -> Result<(), VfsError> {
+        let (parent_path, name) = self.split_parent(path).ok_or(VfsError::InvalidPath)?;
+        let parent = self.resolve_path(&parent_path)?;
+        if parent.vtype != VnodeType::Directory {
+            return Err(VfsError::NotADirectory);
+        }
+        parent.fs.unlink(parent.inode, &name)
+    }
+
+    /// Remove a directory at `path` (must be empty). Mimics POSIX `rmdir`.
+    pub fn rmdir(&self, path: &str) -> Result<(), VfsError> {
+        let node = self.resolve_path(path)?;
+        if node.vtype != VnodeType::Directory {
+            return Err(VfsError::NotADirectory);
+        }
+        self.unlink(path)
+    }
+
+    /// List the entries of the directory at `path`.
+    pub fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, VfsError> {
+        let node = self.resolve_path(path)?;
+        if node.vtype != VnodeType::Directory {
+            return Err(VfsError::NotADirectory);
+        }
+        node.fs.readdir(node.inode)
+    }
+
+    /// Return `(size, vtype)` for the node at `path`.
+    pub fn stat(&self, path: &str) -> Result<(u64, VnodeType), VfsError> {
+        let node = self.resolve_path(path)?;
+        Ok((node.size, node.vtype))
+    }
 }

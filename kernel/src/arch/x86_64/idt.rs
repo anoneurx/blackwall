@@ -2,7 +2,7 @@
 use crate::arch::x86_64::serial;
 use crate::arch::x86_64::trap::{
     blackwall_trap_exc_de, blackwall_trap_exc_df, blackwall_trap_exc_gp, blackwall_trap_exc_pf,
-    blackwall_trap_exc_ud, blackwall_trap_keyboard, blackwall_trap_timer,
+    blackwall_trap_exc_ud, blackwall_trap_keyboard, blackwall_trap_spurious, blackwall_trap_timer,
 };
 use core::arch::asm;
 
@@ -82,6 +82,10 @@ unsafe fn setup_table() {
     // Hardware IRQs (PIC remapped to 0x20..=0x2F).
     IDT.entries[0x20].set_handler(blackwall_trap_timer as *const () as usize);
     IDT.entries[0x21].set_handler(blackwall_trap_keyboard as *const () as usize);
+
+    // Local APIC spurious interrupt (must have a present gate or the delivery
+    // faults with a #GP against the missing entry).
+    IDT.entries[0xFF].set_handler(blackwall_trap_spurious as *const () as usize);
     serial::line(&alloc::format!(
         "[IDT] de={:#x} timer={:#x} yield={:#x}",
         blackwall_trap_exc_de as *const () as usize,

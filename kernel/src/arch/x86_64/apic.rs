@@ -81,10 +81,17 @@ pub fn init(base: u64) {
     write(REG_SVR, 0x1FF);
     write(REG_TPR, 0);
 
-    // Mask the legacy LINT0/LINT1 lines (PIC handles external IRQs).
-    write(REG_LVT_LINT0, 1 << 16);
+    // LINT0 carries the legacy 8259 PIC's INTR into the LAPIC.  With the LAPIC
+    // software-enabled (SVR) QEMU routes the PIC output through LINT0, so it
+    // must be programmed as *ExtINT* (unmasked), not masked, or the pending
+    // IRQ is delivered under a bogus vector and faults as a #GP.  The vector
+    // field is ignored for ExtINT; the PIC's own remapped vector is used.
+    write(REG_LVT_LINT0, 0x700);
+    // LINT1 is unused (LINTA). Mask it.
     write(REG_LVT_LINT1, 1 << 16);
-    write(REG_LVT_ERROR, 0);
+    // Mask the APIC internal-error entry (delivery/illegal-vector errors would
+    // otherwise fire a spurious interrupt with a vector we do not handle).
+    write(REG_LVT_ERROR, 1 << 16);
     // Clear any stale interrupt.
     write(REG_EOI, 0);
 }

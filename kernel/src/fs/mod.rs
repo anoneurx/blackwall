@@ -35,6 +35,8 @@ pub mod vfs {
     pub struct OpenFile {
         pub vnode: Arc<Vnode>,
         pub offset: Arc<SpinLock<u64>>,
+        /// open(2) flags the file was opened with (O_APPEND etc.).
+        pub flags: u64,
     }
 
     // Global VFS manager — protected by the kernel's SpinLock.

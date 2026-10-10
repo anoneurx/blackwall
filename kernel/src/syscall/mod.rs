@@ -27,6 +27,12 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
         SYS_WRITE => fs::sys_write(a0, a1, a2),
         SYS_OPEN => fs::sys_open(a0, a1),
         SYS_CLOSE => fs::sys_close(a0),
+        SYS_LSEEK => fs::sys_lseek(a0, a1, a2),
+        SYS_STAT => fs::sys_stat(a0, a1, a2),
+        SYS_READDIR => fs::sys_readdir(a0, a1, a2),
+        SYS_MKDIR => fs::sys_mkdir(a0),
+        SYS_RMDIR => fs::sys_rmdir(a0),
+        SYS_UNLINK => fs::sys_unlink(a0),
 
         SYS_EXIT => return process::sys_exit(frame, a0),
         SYS_FORK => process::sys_fork(frame),

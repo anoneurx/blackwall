@@ -73,7 +73,8 @@ impl RoundRobinScheduler {
         }
 
         let current_state = self.manager.get(self.current_pid).map(|p| p.state);
-        let runnable = matches!(current_state, Some(ProcessState::Running) | Some(ProcessState::Ready));
+        let runnable =
+            matches!(current_state, Some(ProcessState::Running) | Some(ProcessState::Ready));
         let quantum_expired = ticks % TIME_SLICE_TICKS == 0;
 
         if !runnable {
@@ -199,12 +200,7 @@ impl RoundRobinScheduler {
             self.manager.spawn_user(name, cr3, priority, kernel_stack_size);
         let frame = unsafe {
             // SAFETY: the manager just allocated and zeroed this stack.
-            crate::scheduler::context_switch::init_user_frame(
-                kernel_stack_top,
-                entry,
-                user_rsp,
-                0,
-            )
+            crate::scheduler::context_switch::init_user_frame(kernel_stack_top, entry, user_rsp, 0)
         };
         if let Some(pcb) = self.manager.get_mut(pid) {
             pcb.stack_ptr = frame;
