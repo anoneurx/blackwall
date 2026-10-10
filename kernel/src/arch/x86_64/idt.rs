@@ -98,3 +98,11 @@ unsafe fn load_table() {
 
     asm!("lidt [{ptr}]", ptr = in(reg) &pointer, options(readonly, nostack, preserves_flags));
 }
+
+/// Re-load the already-built IDT into this CPU's IDTR.
+///
+/// Application processors start with a null IDTR; loading the shared table
+/// gives them valid handlers so an unexpected exception does not triple-fault.
+pub unsafe fn reload() {
+    load_table();
+}

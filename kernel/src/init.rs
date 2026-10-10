@@ -31,6 +31,10 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     // We must exit before touching ANY hardware I/O (PIC, PIT, serial ports)
     // because UEFI still owns those until we surrender them here.
     //
+    // Capture the ACPI RSDP from the EFI configuration table while boot
+    // services (which own that table) are still alive.
+    crate::drivers::acpi::capture_rsdp(&system_table);
+
     // SAFETY: No boot-service pointers or references are live at this point.
     let (_runtime_table, _memory_map) =
         unsafe { system_table.exit_boot_services(MemoryType::LOADER_DATA) };
@@ -153,14 +157,7 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     let init_pid = {
         let mut guard = crate::scheduler::SCHEDULER.lock();
         let s = guard.as_mut().expect("scheduler missing");
-        let pid = s.spawn_user_task(
-            "init",
-            image.cr3,
-            image.entry,
-            image.user_rsp,
-            0,
-            32 * 1024,
-        );
+        let pid = s.spawn_user_task("init", image.cr3, image.entry, image.user_rsp, 0, 32 * 1024);
         s.start(boot_pid);
         pid
     };
