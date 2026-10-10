@@ -1,193 +1,138 @@
-use core::arch::{asm, global_asm};
+//! Construction of the initial trap frames new tasks are started from.
+//!
+//! Every task — kernel thread or user process — is entered by restoring an
+//! [`IrqFrame`] and executing `iretq`, exactly like a task that was
+//! preempted.  That keeps a single code path for context switching: there is
+//! no special "first run" logic anywhere in the scheduler.
 
-// ---------------------------------------------------------------------------
-// Context-switch trampoline (assembly)
-// ---------------------------------------------------------------------------
-//
-// The x86_64 System V ABI designates the following as CALLEE-SAVED:
-//   rbx, rbp, r12, r13, r14, r15
-// All other registers are caller-saved and will be clobbered by any normal
-// function call, so we only need to preserve the callee-saved set plus rflags.
-//
-// Stack layout after `switch_to` pushes state onto *old* stack:
-//
-//   [rsp+48]  rflags
-//   [rsp+40]  rbp
-//   [rsp+32]  rbx
-//   [rsp+24]  r15
-//   [rsp+16]  r14
-//   [rsp+ 8]  r13
-//   [rsp+ 0]  r12
-//
-// The return address (pushed by the `call` instruction that invoked
-// switch_to) sits above rflags at [rsp+56] before we push anything.
-// After saving and swapping rsp, we pop the new task's saved state in
-// reverse order and `ret`, which continues execution in the new task at
-// whatever address was on top of *its* stack.
-//
-// Note: SSE/MMX are disabled for this kernel target (soft-float), so we
-// never need to save/restore XMM registers here.
+use crate::arch::x86_64::trap::{
+    IrqFrame, KERNEL_CODE_SEL, KERNEL_DATA_SEL, RFLAGS_IF, RFLAGS_RESERVED, USER_CODE_SEL,
+    USER_DATA_SEL,
+};
+use core::arch::global_asm;
 
 global_asm!(
     r#"
-    .global blackwall_switch_to
-blackwall_switch_to:
-    // rdi = *old_rsp (pointer to where we store the current rsp)
-    // rsi = next_rsp (the new stack pointer to load)
-
-    // Save callee-saved registers + rflags onto the current stack.
-    pushfq
-    push rbp
-    push rbx
-    push r15
-    push r14
-    push r13
-    push r12
-
-    // Store the current stack pointer into *old_rsp.
-    mov [rdi], rsp
-
-    // Load the next task's stack pointer.
-    mov rsp, rsi
-
-    // Restore the next task's saved state.
-    pop r12
-    pop r13
-    pop r14
-    pop r15
-    pop rbx
-    pop rbp
-    popfq
-
-    // Return into the next task (its return address is now on top of stack).
-    ret
+    // Entry stub every kernel thread starts at.  The initial trap frame is
+    // built with r12 holding the thread entry function.
+    .global blackwall_thread_trampoline
+blackwall_thread_trampoline:
+    sti
+    // UEFI/AArch64-style (Win64) ABI: first argument in RCX, 32-byte shadow space.
+    sub rsp, 32
+    mov rcx, r12
+    call blackwall_thread_entry_rust
+    // The entry function never returns (it terminates the thread); park the
+    // CPU in case that contract is ever broken.
+9010:
+    hlt
+    jmp 9010b
 "#
 );
 
 extern "C" {
-    /// Low-level context-switch routine implemented in assembly above.
-    ///
-    /// # Safety
-    ///
-    /// - `old_rsp` must point to a valid `u64` that will receive the
-    ///   current stack pointer; it must remain valid for the lifetime of
-    ///   the task.
-    /// - `next_rsp` must be the `stack_ptr` of a task whose stack was
-    ///   either initialised by `init_stack` or previously saved by a
-    ///   call to this function.
-    fn blackwall_switch_to(old_rsp: *mut u64, next_rsp: u64);
+    /// Assembly trampoline every kernel thread starts at (see `global_asm!`).
+    pub fn blackwall_thread_trampoline();
 }
 
+/// Called from [`blackwall_thread_trampoline`] with the thread entry function
+/// pointer that was stashed in `r12` of the initial frame.
 #[no_mangle]
-pub unsafe extern "C" fn thread_trampoline() {
-    // 1. Force unlock the scheduler lock
-    crate::scheduler::SCHEDULER.force_unlock();
-
-    // 2. Enable interrupts
-    asm!("sti", options(nomem, nostack, preserves_flags));
-
-    // 3. Get the entry function pointer from r12
-    let entry: fn();
-    asm!("mov {}, r12", out(reg) entry, options(nomem, nostack, preserves_flags));
-
-    // 4. Run the entry function
+extern "C" fn blackwall_thread_entry_rust(entry: usize) {
+    let entry: fn() = unsafe { core::mem::transmute(entry) };
     entry();
 
-    // 5. If the entry function returns, terminate the thread
-    asm!("cli", options(nomem, nostack, preserves_flags));
-    if let Some(mut sched) = crate::scheduler::SCHEDULER.try_lock() {
-        if let Some(ref mut s) = *sched {
-            let pid = s.current_pid;
-            s.terminate_task(pid);
-            s.schedule();
+    // The thread function returned — terminate this task and let the
+    // scheduler pick someone else.
+    if let Some(mut guard) = crate::scheduler::SCHEDULER.try_lock() {
+        if let Some(sched) = guard.as_mut() {
+            let pid = sched.current_pid;
+            sched.terminate_task(pid);
         }
     }
-
     loop {
-        asm!("hlt", options(nomem, nostack, preserves_flags));
+        crate::arch::x86_64::trap::yield_now();
     }
 }
 
-/// Initialise a fresh thread stack so that the first `switch_to` into it
-/// will begin executing `thread_trampoline` which calls `entry`.
+/// Build the initial frame for a **kernel thread**.
 ///
-/// # Arguments
-///
-/// * `stack_top` — pointer one byte **past** the end of the allocated stack
-///   region (i.e. the initial value of `rsp` before any pushes).
-///   **Must** be 16-byte aligned.
-/// * `entry` — the function the thread will start executing.
-///
-/// # Returns
-///
-/// The value that should be stored in `ProcessControlBlock::stack_ptr`.
+/// Restoring it lands in `blackwall_thread_trampoline` running in ring 0 with
+/// a fresh stack.
 ///
 /// # Safety
-///
-/// `stack_top` must point to a valid, writable memory region of at least
-/// 7 × 8 = 56 bytes that will live for the entire lifetime of the thread.
-pub unsafe fn init_stack(stack_top: *mut u8, entry: fn()) -> u64 {
-    // We build the initial stack frame that `switch_to` will "pop" when
-    // this thread is first scheduled.
-    //
-    // Frame layout (from top of stack, addresses decrease):
-    //
-    //   [stack_top - 8 ]  trampoline address  ← `ret` in switch_to jumps here
-    //   [stack_top - 16]  r12  = entry        ← used by trampoline
-    //   [stack_top - 24]  r13  = 0
-    //   [stack_top - 32]  r14  = 0
-    //   [stack_top - 40]  r15  = 0
-    //   [stack_top - 48]  rbx  = 0
-    //   [stack_top - 56]  rbp  = 0
-    //   [stack_top - 64]  rflags = 0x200  (IF set — interrupts enabled)
-    //                                      ← this is where rsp will point
+/// `stack_top` must point one past the end of a writable, live stack region of
+/// at least [`initial_frame_size`] bytes below it.
+pub unsafe fn init_kernel_frame(stack_top: u64, entry: fn()) -> u64 {
+    let frame_ptr = stack_top - core::mem::size_of::<IrqFrame>() as u64;
+    let frame = &mut *(frame_ptr as *mut IrqFrame);
 
-    let mut rsp = stack_top as *mut u64;
+    *frame = IrqFrame {
+        r15: 0,
+        r14: 0,
+        r13: 0,
+        r12: entry as *const () as usize as u64,
+        r11: 0,
+        r10: 0,
+        r9: 0,
+        r8: 0,
+        rdi: 0,
+        rsi: 0,
+        rbp: 0,
+        rbx: 0,
+        rdx: 0,
+        rcx: 0,
+        rax: 0,
+        err: 0,
+        rip: blackwall_thread_trampoline as *const () as u64,
+        cs: KERNEL_CODE_SEL,
+        rflags: RFLAGS_IF | RFLAGS_RESERVED,
+        rsp: stack_top,
+        ss: KERNEL_DATA_SEL,
+    };
 
-    // Align down to 8 bytes (stack_top should already be 16-byte aligned).
-    rsp = rsp.sub(1);
-    // entry address — the `ret` at the end of switch_to pops this to jump to trampoline.
-    rsp.write(thread_trampoline as *const () as u64);
-
-    // Saved callee-saved registers.
-    rsp = rsp.sub(1);
-    rsp.write(entry as *const () as u64); // r12 stores the real entry fn
-    rsp = rsp.sub(1);
-    rsp.write(0); // r13
-    rsp = rsp.sub(1);
-    rsp.write(0); // r14
-    rsp = rsp.sub(1);
-    rsp.write(0); // r15
-    rsp = rsp.sub(1);
-    rsp.write(0); // rbx
-    rsp = rsp.sub(1);
-    rsp.write(0); // rbp
-                  // rflags — enable interrupts (IF = bit 9 = 0x200).
-    rsp = rsp.sub(1);
-    rsp.write(0x200);
-
-    rsp as u64
+    frame_ptr
 }
 
-/// Perform a context switch from the current task to `next_rsp`.
+/// Build the initial frame for a **user process**.
 ///
-/// Saves the current CPU state to `*old_rsp`, then restores the state
-/// from `next_rsp`.
+/// Restoring it executes `iretq` into ring 3 at `entry` with `user_rsp`.
 ///
 /// # Safety
-///
-/// Same requirements as `blackwall_switch_to`.
-pub unsafe fn switch_to(old_rsp: *mut u64, next_rsp: u64) {
-    blackwall_switch_to(old_rsp, next_rsp);
-}
+/// `kernel_stack_top` must point one past a live, writable kernel stack and
+/// the target ring-3 address space must already be mapped in `cr3`.
+pub unsafe fn init_user_frame(
+    kernel_stack_top: u64,
+    entry: u64,
+    user_rsp: u64,
+    arg: u64,
+) -> u64 {
+    let frame_ptr = kernel_stack_top - core::mem::size_of::<IrqFrame>() as u64;
+    let frame = &mut *(frame_ptr as *mut IrqFrame);
 
-/// Yield the current execution context.
-///
-/// Useful inside the idle loop — lets the compiler know execution might
-/// not continue linearly here.
-#[inline(always)]
-pub fn cpu_relax() {
-    unsafe {
-        asm!("pause", options(nostack, nomem, preserves_flags));
-    }
+    *frame = IrqFrame {
+        r15: 0,
+        r14: 0,
+        r13: 0,
+        r12: 0,
+        r11: 0,
+        r10: 0,
+        r9: 0,
+        r8: 0,
+        rdi: arg,
+        rsi: 0,
+        rbp: 0,
+        rbx: 0,
+        rdx: 0,
+        rcx: 0,
+        rax: 0,
+        err: 0,
+        rip: entry,
+        cs: USER_CODE_SEL,
+        rflags: RFLAGS_IF | RFLAGS_RESERVED,
+        rsp: user_rsp,
+        ss: USER_DATA_SEL,
+    };
+
+    frame_ptr
 }

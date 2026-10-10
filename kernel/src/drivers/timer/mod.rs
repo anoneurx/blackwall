@@ -5,6 +5,7 @@ use core::arch::asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 const PIT_CH0_DATA: u16 = 0x40;
+#[allow(dead_code)]
 const PIT_CH2_DATA: u16 = 0x42;
 const PIT_CMD: u16 = 0x43;
 const PIT_BASE_HZ: u32 = 1_193_182;

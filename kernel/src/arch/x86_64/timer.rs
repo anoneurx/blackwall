@@ -23,20 +23,24 @@ pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
-#[no_mangle]
-pub extern "C" fn blackwall_timer_tick_rust() {
+/// Called from the IRQ0 trap entry on every PIT interrupt.
+///
+/// Advances the tick counter, acknowledges the interrupt at the PIC and
+/// returns the new absolute tick value for the scheduler.
+pub fn on_tick() -> u64 {
     let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
-
-    // Send End of Interrupt (EOI) to Master PIC
+    // End Of Interrupt — master PIC (the PIT is the only unmasked source).
     unsafe {
         outb(0x20, 0x20);
     }
+    ticks
+}
 
-    // Call scheduler tick
-    if let Some(mut sched) = crate::scheduler::SCHEDULER.try_lock() {
-        if let Some(ref mut s) = *sched {
-            s.tick(ticks);
-        }
+/// Unmask IRQ0 (PIT) and IRQ1 (PS/2 keyboard) on the master PIC.
+pub fn unmask_keyboard() {
+    unsafe {
+        let mask = inb(0x21);
+        outb(0x21, mask & !0x02);
     }
 }
 
@@ -45,11 +49,11 @@ unsafe fn remap_pic() {
     outb(0x20, 0x11);
     outb(0xA0, 0x11);
 
-    // ICW2: Master offset = 0x20, Slave offset = 0x28
+    // ICW2: Master offset of 0x20, Slave offset of 0x28
     outb(0x21, 0x20);
     outb(0xA1, 0x28);
 
-    // ICW3: cascade configuration
+    // ICW3: cascade relationship
     outb(0x21, 0x04);
     outb(0xA1, 0x02);
 
@@ -66,9 +70,17 @@ unsafe fn program_pit(hz: u32) {
     let divisor = 1_193_182u32 / hz;
     outb(0x43, 0x36);
     outb(0x40, (divisor & 0xff) as u8);
-    outb(0x40, ((divisor >> 8) & 0xff) as u8);
+    outb(0x40, (divisor >> 8) as u8);
 }
 
-unsafe fn outb(port: u16, value: u8) {
+#[inline(always)]
+pub unsafe fn outb(port: u16, value: u8) {
     asm!("out dx, al", in("dx") port, in("al") value, options(nostack, preserves_flags));
+}
+
+#[inline(always)]
+pub unsafe fn inb(port: u16) -> u8 {
+    let value: u8;
+    asm!("in al, dx", in("dx") port, out("al") value, options(nostack, preserves_flags));
+    value
 }

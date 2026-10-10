@@ -1,7 +1,9 @@
 #[cfg(target_os = "uefi")]
-use crate::arch::x86_64::{cpu, gdt, idt, serial, timer};
+use crate::arch::x86_64::{cpu, gdt, idt, interrupts, serial, timer, trap};
 #[cfg(target_os = "uefi")]
 use crate::memory;
+#[cfg(target_os = "uefi")]
+use crate::scheduler::RoundRobinScheduler;
 #[cfg(target_os = "uefi")]
 use blackwall_shared::messages;
 #[cfg(target_os = "uefi")]
@@ -16,11 +18,6 @@ use uefi::table::boot::MemoryType;
 #[cfg(target_os = "uefi")]
 static INIT_ELF: &[u8] =
     include_bytes!("../../userspace/init/target/x86_64-unknown-none/debug/init");
-
-/// Dedicated kernel stack for the Ring 3 → Ring 0 (syscall / interrupt) transition.
-/// 32 KiB — large enough for deep kernel call stacks from userspace.
-#[cfg(target_os = "uefi")]
-static mut KERNEL_ENTRY_STACK: [u8; 4096 * 8] = [0u8; 4096 * 8];
 
 #[cfg(target_os = "uefi")]
 pub fn start(system_table: SystemTable<Boot>) -> ! {
@@ -46,6 +43,10 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     timer::init();
     crate::arch::x86_64::syscall::init();
 
+    // The page table the firmware left us in.  Kernel threads must switch
+    // back to it whenever they leave a user task.
+    let kernel_cr3 = trap::current_cr3();
+
     // ── Boot banner ──────────────────────────────────────────────────────────
     serial::line(messages::BOOT_BANNER);
     serial::line("");
@@ -56,25 +57,30 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     serial::line("Syscall Interface Ready");
     serial::line("");
 
-    // ── Kernel idle task (PID 0) ─────────────────────────────────────────────
-    let mut sched = crate::scheduler::RoundRobinScheduler::new();
-    sched.spawn_kernel_thread("idle", idle_task, 0);
+    // ── Scheduler + boot/idle context (PID 0) ────────────────────────────────
+    // The context we are executing in right now is registered as an ordinary
+    // task so the scheduler can save and restore it like any other.  It never
+    // returns to ring 3 and never issues syscalls, so it needs no private
+    // kernel stack.
+    let mut sched = RoundRobinScheduler::new();
+    let boot_pid = sched.manager_mut().register_running("idle", kernel_cr3);
     serial::line(messages::PID_0_IDLE);
 
-    // Store globally so timer ISR can reach the scheduler.
+    // Publish the (not yet enabled) scheduler so later subsystems can reach it.
     *crate::scheduler::SCHEDULER.lock() = Some(sched);
 
     // ── Initialize VFS and mount filesystems (Phase 6) ───────────────────────
     crate::fs::init(INIT_ELF);
 
-    // Read the init ELF from VFS to verify VFS read works!
-    let mut init_buf = alloc::vec![0u8; 128 * 1024]; // allocate 128 KiB buffer
-    let bytes_read = {
+    // Read the whole init ELF from the VFS.  The size comes from the inode so
+    // the buffer is always large enough — the ELF's section headers (and thus
+    // its PIE relocations) live at the very end of the file and must be intact.
+    let init_buf = {
         let vfs = crate::fs::vfs::VFS.lock();
         let vfs_mgr = vfs.as_ref().expect("VFS not initialized");
-        let vnode = vfs_mgr.resolve_path("/bin/init").expect("Failed to resolve /bin/init");
-        vnode.fs.read(vnode.inode, &mut init_buf, 0).expect("Failed to read /bin/init")
+        vfs_mgr.read_all("/bin/init").expect("Failed to read /bin/init")
     };
+    let bytes_read = init_buf.len();
 
     serial::line(&alloc::format!(
         "[DEBUG] Successfully read {} bytes of init ELF from VFS",
@@ -100,6 +106,8 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
 
     // ── Initialize Device Drivers (Phase 8) ──────────────────────────────────
     crate::drivers::init();
+    // Drivers run with IRQs masked; allow the PS/2 keyboard through now.
+    timer::unmask_keyboard();
 
     // ── Initialize Network Stack (Phase 9) ───────────────────────────────────
     crate::net::init();
@@ -113,27 +121,41 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     serial::line("Launching userspace init process...");
     serial::line("");
 
-    // ── Kernel entry-stack top pointer ────────────────────────────────────────
-    let kstack_top = {
-        let base = core::ptr::addr_of!(KERNEL_ENTRY_STACK) as u64;
-        base + (4096 * 8) as u64
-    };
-
-    // ── Hand off to Ring 3 via iretq ─────────────────────────────────────────
-    // `spawn_user_process` parses the ELF, maps user pages, and executes
-    // `iretq` — it does NOT return.
-    unsafe {
-        crate::process::loader::spawn_user_process(
+    // ── Load the init ELF into its own address space ─────────────────────────
+    let image = unsafe {
+        crate::process::loader::build_user_image(
             &init_buf[..bytes_read],
             &mut memory_state.virtual_memory,
             &mut memory_state.physical,
-            kstack_top,
         )
-    }
-}
+    };
 
-#[cfg(target_os = "uefi")]
-pub fn idle_task() {
+    // ── Register init as a user task and enable scheduling ───────────────────
+    let init_pid = {
+        let mut guard = crate::scheduler::SCHEDULER.lock();
+        let s = guard.as_mut().expect("scheduler missing");
+        let pid = s.spawn_user_task(
+            "init",
+            image.cr3,
+            image.entry,
+            image.user_rsp,
+            0,
+            32 * 1024,
+        );
+        s.start(boot_pid);
+        pid
+    };
+
+    serial::line(&alloc::format!("PID {} init", init_pid));
+
+    // ── Turn on interrupts and become the idle task ──────────────────────────
+    // The first timer tick (or the explicit yield below) switches the CPU to
+    // the init task; from here on the boot context only runs when nothing else
+    // is runnable.
+    serial::line("interrupts on; entering idle");
+    interrupts::enable();
+    trap::yield_now();
+
     loop {
         crate::net::poll();
         unsafe {

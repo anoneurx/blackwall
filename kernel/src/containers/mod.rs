@@ -4,7 +4,6 @@ extern crate alloc;
 use crate::net::{IpAddress, MacAddress};
 use crate::sync::spin::SpinLock;
 use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 // ── Namespace types ──────────────────────────────────────────────────────────

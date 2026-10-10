@@ -102,9 +102,13 @@ pub mod syscall {
     pub const SYS_WRITE: u64 = 1;
     pub const SYS_OPEN: u64 = 2;
     pub const SYS_CLOSE: u64 = 3;
+    pub const SYS_YIELD: u64 = 24;
+    pub const SYS_SLEEP: u64 = 35;
+    pub const SYS_GETPID: u64 = 39;
     pub const SYS_FORK: u64 = 57;
     pub const SYS_EXECVE: u64 = 59;
     pub const SYS_EXIT: u64 = 60;
+    pub const SYS_GETPPID: u64 = 110;
 
     // Error codes
     pub const ENOSYS: i64 = -38;

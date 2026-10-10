@@ -77,6 +77,21 @@ unsafe fn load_tables() {
 
     asm!("lgdt [{ptr}]", ptr = in(reg) &descriptor, options(readonly, nostack, preserves_flags));
 
+    // Reload CS with our own kernel code selector via a far return.  Until this
+    // happens the CPU keeps running with the firmware's CS (typically 0x38),
+    // which is outside our GDT limit and therefore faults the moment an
+    // interrupt tries to `iretq` back to ring 0.
+    asm!(
+        "lea rax, [rip + 2f]",
+        "push {cs}",
+        "push rax",
+        "retfq",
+        "2:",
+        cs = in(reg) 1u64 << 3,
+        out("rax") _,
+        options(preserves_flags)
+    );
+
     let data_selector: u16 = 2 << 3;
     asm!(
         "mov ds, ax",

@@ -105,21 +105,31 @@ impl<'a> Ipv4Packet<'a> {
     }
 }
 
-pub fn compute_checksum(data: &[u8]) -> u16 {
-    let mut sum = 0u32;
+/// Accumulate the one's-complement big-endian 16-bit sum of `data` into a
+/// running 32-bit `sum`.  Exposed so callers (e.g. TCP) can seed the sum with
+/// a pseudo-header before folding.
+pub fn checksum_accumulate(mut sum: u32, data: &[u8]) -> u32 {
     let mut i = 0;
-    while i < data.len() - 1 {
-        let word = ((data[i] as u32) << 8) | (data[i + 1] as u32);
-        sum += word;
+    while i + 1 < data.len() {
+        sum += ((data[i] as u32) << 8) | (data[i + 1] as u32);
         i += 2;
     }
     if i < data.len() {
         sum += (data[i] as u32) << 8;
     }
+    sum
+}
+
+/// Fold a 32-bit one's-complement accumulator into the final 16-bit checksum.
+pub fn checksum_finish(mut sum: u32) -> u16 {
     while (sum >> 16) > 0 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
     !(sum as u16)
+}
+
+pub fn compute_checksum(data: &[u8]) -> u16 {
+    checksum_finish(checksum_accumulate(0, data))
 }
 
 #[cfg(test)]

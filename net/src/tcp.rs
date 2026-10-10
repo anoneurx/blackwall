@@ -145,7 +145,7 @@ impl<'a> TcpSegment<'a> {
         buffer.push((self.window >> 8) as u8);
         buffer.push((self.window & 0xFF) as u8);
 
-        // Checksum placeholder
+        // Checksum (zero here; filled by `serialize_checksummed`).
         buffer.push(0);
         buffer.push(0);
 
@@ -155,6 +155,35 @@ impl<'a> TcpSegment<'a> {
 
         buffer.extend_from_slice(self.payload);
     }
+
+    /// Serialize the segment and fill in the TCP checksum computed over the
+    /// IPv4 pseudo-header (RFC 793 §3.1): source/dest address, zero, protocol
+    /// 6, and the TCP length.
+    pub fn serialize_checksummed(
+        &self,
+        buffer: &mut Vec<u8>,
+        source: [u8; 4],
+        dest: [u8; 4],
+    ) {
+        let start = buffer.len();
+        self.serialize(buffer);
+        let checksum = compute_tcp_checksum(source, dest, &buffer[start..]);
+        buffer[start + 16] = (checksum >> 8) as u8;
+        buffer[start + 17] = (checksum & 0xFF) as u8;
+    }
+}
+
+/// One's-complement checksum over `tcp_segment`, prefixed by the IPv4
+/// pseudo-header formed from `source`, `dest` and the segment length.
+pub fn compute_tcp_checksum(source: [u8; 4], dest: [u8; 4], tcp_segment: &[u8]) -> u16 {
+    use crate::ipv4::{checksum_accumulate, checksum_finish};
+    let mut sum = 0u32;
+    sum = checksum_accumulate(sum, &source);
+    sum = checksum_accumulate(sum, &dest);
+    sum = checksum_accumulate(sum, &[0, 6]);
+    sum = checksum_accumulate(sum, &(tcp_segment.len() as u16).to_be_bytes());
+    sum = checksum_accumulate(sum, tcp_segment);
+    checksum_finish(sum)
 }
 
 pub fn process_tcp_state(socket: &mut TcpSocket, seg: &TcpSegment) {
@@ -189,5 +218,59 @@ pub fn process_tcp_state(socket: &mut TcpSocket, seg: &TcpSegment) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn syn_segment() -> TcpSegment<'static> {
+        TcpSegment {
+            src_port: 1234,
+            dest_port: 80,
+            seq_num: 1,
+            ack_num: 0,
+            syn: true,
+            ack: false,
+            fin: false,
+            rst: false,
+            psh: false,
+            window: 65535,
+            payload: &[],
+        }
+    }
+
+    #[test]
+    fn checksummed_segment_validates_to_zero() {
+        let seg = syn_segment();
+        let mut buf = Vec::new();
+        seg.serialize_checksummed(&mut buf, [192, 168, 0, 1], [192, 168, 0, 2]);
+        // Recomputing over the serialized segment (checksum now present) must
+        // fold to zero.
+        assert_eq!(compute_tcp_checksum([192, 168, 0, 1], [192, 168, 0, 2], &buf), 0);
+    }
+
+    #[test]
+    fn checksum_covers_pseudo_header() {
+        let seg = syn_segment();
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        seg.serialize_checksummed(&mut a, [10, 0, 0, 1], [10, 0, 0, 2]);
+        seg.serialize_checksummed(&mut b, [10, 0, 0, 3], [10, 0, 0, 2]);
+        assert_ne!(a[16..18], b[16..18]);
+    }
+
+    #[test]
+    fn serialize_parse_roundtrip() {
+        let seg = syn_segment();
+        let mut buf = Vec::new();
+        seg.serialize(&mut buf);
+        let parsed = TcpSegment::parse(&buf).expect("parse");
+        assert_eq!(parsed.src_port, 1234);
+        assert_eq!(parsed.dest_port, 80);
+        assert_eq!(parsed.seq_num, 1);
+        assert!(parsed.syn);
+        assert!(!parsed.ack);
     }
 }

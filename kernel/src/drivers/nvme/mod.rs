@@ -3,7 +3,6 @@
 extern crate alloc;
 
 use crate::arch::x86_64::serial;
-use alloc::vec::Vec;
 
 // NVMe Controller Registers offsets (relative to BAR0 MMIO base)
 pub const NVME_REG_CAP: usize = 0x00; // Controller Capabilities (u64)

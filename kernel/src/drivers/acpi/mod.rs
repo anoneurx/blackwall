@@ -3,10 +3,11 @@
 extern crate alloc;
 
 use crate::arch::x86_64::serial;
-use alloc::vec::Vec;
 
 const RSDP_SIG: &[u8; 8] = b"RSD PTR ";
+#[allow(dead_code)]
 const RSDT_SIG: &[u8; 4] = b"RSDT";
+#[allow(dead_code)]
 const XSDT_SIG: &[u8; 4] = b"XSDT";
 const MADT_SIG: &[u8; 4] = b"APIC";
 const FADT_SIG: &[u8; 4] = b"FACP";

@@ -1,82 +1,16 @@
 #![allow(bad_asm_style)]
 use crate::arch::x86_64::serial;
-use core::arch::{asm, global_asm};
+use crate::arch::x86_64::trap::{
+    blackwall_trap_exc_de, blackwall_trap_exc_df, blackwall_trap_exc_gp, blackwall_trap_exc_pf,
+    blackwall_trap_exc_ud, blackwall_trap_keyboard, blackwall_trap_timer,
+};
+use core::arch::asm;
 
-global_asm!(
-    r#"
-    .intel_syntax noprefix
-
-    .global blackwall_divide_by_zero_handler
-blackwall_divide_by_zero_handler:
-    cli
-    hlt
-    jmp blackwall_divide_by_zero_handler
-
-    .global blackwall_invalid_opcode_handler
-blackwall_invalid_opcode_handler:
-    cli
-    hlt
-    jmp blackwall_invalid_opcode_handler
-
-    .global blackwall_double_fault_handler
-blackwall_double_fault_handler:
-    cli
-    hlt
-    jmp blackwall_double_fault_handler
-
-    .global blackwall_general_protection_handler
-blackwall_general_protection_handler:
-    cli
-    hlt
-    jmp blackwall_general_protection_handler
-
-    .global blackwall_page_fault_handler
-blackwall_page_fault_handler:
-    cli
-    mov rax, cr2
-    mov rdi, rax
-    mov rsi, [rsp]
-    mov rdx, [rsp + 8]   // RIP of faulting instruction
-    mov rcx, [rsp + 32]  // RSP at time of fault
-    call blackwall_page_fault_rust
-    hlt
-    jmp blackwall_page_fault_handler
-
-    .global blackwall_timer_handler
-blackwall_timer_handler:
-    push rax
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push r8
-    push r9
-    push r10
-    push r11
-
-    call blackwall_timer_tick_rust
-
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rax
-    iretq
-"#
-);
-
-extern "C" {
-    fn blackwall_divide_by_zero_handler();
-    fn blackwall_invalid_opcode_handler();
-    fn blackwall_double_fault_handler();
-    fn blackwall_general_protection_handler();
-    fn blackwall_page_fault_handler();
-    fn blackwall_page_fault_rust(address: u64, error_code: u64, rip: u64, rsp: u64) -> !;
-    fn blackwall_timer_handler();
+#[repr(C, packed)]
+#[allow(dead_code)]
+struct DescriptorTablePointer {
+    limit: u16,
+    base: u64,
 }
 
 #[repr(C, packed)]
@@ -95,6 +29,7 @@ impl IdtEntry {
         Self { offset_low: 0, selector: 0, options: 0, offset_mid: 0, offset_high: 0, reserved: 0 }
     }
 
+    /// Install an interrupt-gate handler (DPL 0, present, interrupt gate).
     fn set_handler(&mut self, handler: usize) {
         self.offset_low = handler as u16;
         self.selector = 0x08;
@@ -126,7 +61,8 @@ static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
 pub fn init() {
     unsafe {
-        // SAFETY: The IDT is initialized once during startup before interrupts are enabled.
+        // SAFETY: The IDT is initialized once during startup before interrupts
+        // are enabled.
         setup_table();
         load_table();
     }
@@ -135,12 +71,23 @@ pub fn init() {
 }
 
 unsafe fn setup_table() {
-    IDT.entries[0].set_handler(blackwall_divide_by_zero_handler as *const () as usize);
-    IDT.entries[6].set_handler(blackwall_invalid_opcode_handler as *const () as usize);
-    IDT.entries[8].set_handler(blackwall_double_fault_handler as *const () as usize);
-    IDT.entries[13].set_handler(blackwall_general_protection_handler as *const () as usize);
-    IDT.entries[14].set_handler(blackwall_page_fault_handler as *const () as usize);
-    IDT.entries[0x20].set_handler(blackwall_timer_handler as *const () as usize);
+    // Exceptions without an error code.
+    IDT.entries[0].set_handler(blackwall_trap_exc_de as *const () as usize);
+    IDT.entries[6].set_handler(blackwall_trap_exc_ud as *const () as usize);
+    // Exceptions that push an error code.
+    IDT.entries[8].set_handler(blackwall_trap_exc_df as *const () as usize);
+    IDT.entries[13].set_handler(blackwall_trap_exc_gp as *const () as usize);
+    IDT.entries[14].set_handler(blackwall_trap_exc_pf as *const () as usize);
+
+    // Hardware IRQs (PIC remapped to 0x20..=0x2F).
+    IDT.entries[0x20].set_handler(blackwall_trap_timer as *const () as usize);
+    IDT.entries[0x21].set_handler(blackwall_trap_keyboard as *const () as usize);
+    serial::line(&alloc::format!(
+        "[IDT] de={:#x} timer={:#x} yield={:#x}",
+        blackwall_trap_exc_de as *const () as usize,
+        blackwall_trap_timer as *const () as usize,
+        crate::arch::x86_64::trap::blackwall_trap_yield as *const () as usize,
+    ));
 }
 
 unsafe fn load_table() {

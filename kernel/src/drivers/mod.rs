@@ -41,6 +41,24 @@ pub fn init() {
             }
         }
 
+        // AHCI (SATA) controller: Class 01, Subclass 06, programming interface 0x01.
+        // The AHCI BAR is BAR5 (ABAR), always memory-mapped.
+        if dev.class_code == 0x01 && dev.subclass == 0x06 && dev.prog_if == 0x01 {
+            let mmio_addr = match dev.get_bar(5) {
+                PciBar::Memory32 { address, .. } => Some(address as u64),
+                PciBar::Memory64 { address, .. } => Some(address),
+                _ => None,
+            };
+
+            if let Some(addr) = mmio_addr {
+                if let Some(ctrl) = ahci::init(addr) {
+                    *ahci::AHCI_CONTROLLER.lock() = Some(ctrl);
+                }
+            } else {
+                serial::line("[DRIVERS] Found AHCI Controller but BAR5 is not MMIO.");
+            }
+        }
+
         // VirtIO Device identification: Vendor 0x1AF4 (Red Hat)
         if dev.vendor_id == 0x1AF4 {
             let bar0 = dev.get_bar(0);

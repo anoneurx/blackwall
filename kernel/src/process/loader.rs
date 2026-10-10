@@ -1,5 +1,5 @@
-use super::elf::{ElfLoader, PF_W, PF_X};
-use crate::arch::x86_64::{gdt, serial, syscall};
+use super::elf::{ElfLoader, PF_W, PF_X, R_X86_64_RELATIVE};
+use crate::arch::x86_64::serial;
 use crate::memory::{
     paging::{
         align_up, PageTable, PageTableEntry, PAGE_HUGE, PAGE_NO_EXECUTE, PAGE_PRESENT, PAGE_SIZE,
@@ -8,20 +8,25 @@ use crate::memory::{
     physical::PhysicalMemoryManager,
     r#virtual::VirtualMemoryManager,
 };
+use alloc::vec::Vec;
 use core::arch::asm;
 
 /// Virtual address where the user stack top is placed.
 pub const USER_STACK_TOP: u64 = 0x0000_7fff_ffff_0000;
 /// Size of the user stack: 64 KiB.
 pub const USER_STACK_SIZE: u64 = 64 * 1024;
-
 /// For PIE binaries, the virtual base we map them at.
 pub const USER_LOAD_BASE: u64 = 0x0000_0000_0040_0000; // 4 MiB
 
-/// Segment selectors (index << 3 | RPL).
-/// See gdt.rs: User Data = entry 3, User Code = entry 4, both with RPL=3.
-const USER_DATA_SEL: u64 = (3 << 3) | 3;
-const USER_CODE_SEL: u64 = (4 << 3) | 3;
+/// Everything the scheduler needs to start a loaded user process.
+pub struct UserImage {
+    /// Physical address of the process page table (to be loaded into CR3).
+    pub cr3: u64,
+    /// Ring-3 entry point.
+    pub entry: u64,
+    /// Initial ring-3 stack pointer.
+    pub user_rsp: u64,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers for walking / building the VMM's *own* PML4
@@ -69,8 +74,6 @@ unsafe fn get_or_alloc_entry(
 ) -> *mut PageTable {
     if entry.is_present() {
         if entry.flags() & PAGE_HUGE != 0 {
-            // Split the huge page into 512 x 4 KiB entries pointing at the
-            // same underlying 2 MiB / 1 GiB region, then keep descending.
             let region_base = entry.address();
             let child_flags = entry.flags() & !PAGE_HUGE;
             let frame = pmm.allocate_frame().expect("OOM: split huge page");
@@ -99,10 +102,6 @@ unsafe fn get_or_alloc_entry(
 
 /// Recursively deep-copy the boot page-table hierarchy rooted at `src_phys`
 /// into the already-zeroed root table at `dst_phys`.
-///
-/// This yields a page table *independent* of the kernel's active tables, so the
-/// user loader can add ring-3 mappings and split huge pages without mutating
-/// (and corrupting) the tables the kernel is currently executing from.
 unsafe fn deep_clone_table(
     src_phys: u64,
     dst_phys: u64,
@@ -121,12 +120,8 @@ unsafe fn deep_clone_table(
             continue;
         }
         if e.flags() & PAGE_HUGE != 0 {
-            // Huge pages (1 GiB at P3, 2 MiB at P2) are kept as-is; they are
-            // read-only-shared with the boot tables (overlays that touch them
-            // split them later).
             (*dst).entries[i] = e;
         } else if depth >= 3 {
-            // P1 tables hold leaf 4 KiB mappings — copy directly, no child.
             (*dst).entries[i] = e;
         } else {
             let frame = pmm.allocate_frame().expect("OOM: clone table");
@@ -143,64 +138,53 @@ unsafe fn deep_clone_table(
 // Public entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Load a user process from an ELF byte slice and jump to Ring 3.
+/// Load a user process from an ELF byte slice into a fresh address space.
+///
+/// Returns the page-table root, entry point and initial stack pointer; it does
+/// **not** switch to ring 3.  The scheduler starts the process later, through
+/// the normal trap-frame restore, which is what makes it a first-class task.
 ///
 /// # Safety
 /// - `vmm` and `pmm` must be valid and exclusively owned.
-/// - `kernel_stack_top` must point to a valid kernel stack.
-/// - This function does **not** return; it drops to Ring 3 via `iretq`.
-pub unsafe fn spawn_user_process(
+pub unsafe fn build_user_image(
     elf_bytes: &[u8],
     vmm: &mut VirtualMemoryManager,
     pmm: &mut PhysicalMemoryManager,
-    kernel_stack_top: u64,
-) -> ! {
-    // ── Parse ELF ────────────────────────────────────────────────────────────
-    serial::line("[DBG] ElfLoader::parse...");
+) -> UserImage {
     let loader = ElfLoader::parse(elf_bytes).expect("Failed to parse init ELF");
     let load_base = if loader.is_pie() { USER_LOAD_BASE } else { 0 };
     let entry = loader.entry(load_base);
     serial::line(&alloc::format!(
-        "[DBG] parse ok, is_pie={}, entry=0x{:x}, segs={}",
+        "[DBG] ELF parsed: pie={}, entry=0x{:x}, segments={}",
         loader.is_pie(),
         entry,
         loader.load_segments().count()
     ));
 
-    serial::line("Userspace: Loading init binary...");
-
-    // The VMM owns a freshly-zeroed PML4 frame for the user process.
     let user_p4_phys = vmm.root_frame().address();
-    serial::line(&alloc::format!("[DBG] user_p4_phys=0x{:x}", user_p4_phys));
 
-    // ── Copy kernel PML4 entries into the new page table ─────────────────────
-    // The kernel currently runs identity-mapped under UEFI paging (PE loaded at
-    // a low address). We deep-clone the FULL boot CR3 page table hierarchy (all
-    // 512 slots) so that code executing right after `mov cr3` stays reachable,
-    // while keeping the kernel's own live tables untouched.
+    // ── Copy the kernel's boot tables into the new PML4 ──────────────────────
+    // The kernel keeps executing through the switch, so its image and stacks
+    // must stay mapped in the new address space.
     {
         let cr3: u64;
-        asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack));
+        asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
         let boot_p4_phys = cr3 & !0xFFF_u64;
-        serial::line(&alloc::format!("[DBG] cloning boot tables from 0x{:x}", boot_p4_phys));
         deep_clone_table(boot_p4_phys, user_p4_phys, pmm, 0);
-        serial::line("[DBG] clone done");
     }
 
-    // ── Map each LOAD segment into the user PML4 ─────────────────────────────
+    // ── Pass 1: collect per-page permissions ─────────────────────────────────
+    // Two LOAD segments may share a page (for example an RX segment ending and
+    // an RO segment beginning inside the same 4 KiB page).  The permissions of
+    // such a page must be the *union* of both segments' wishes; mapping them in
+    // one pass would let the second segment clobber the first and, in the worst
+    // case, strip execute permission from a page holding code (the original
+    // Ring-3 page-fault bug).
+    let mut pages: Vec<(u64, u64)> = Vec::new();
     for ph in loader.load_segments() {
         if ph.p_memsz == 0 {
             continue;
         }
-
-        serial::line(&alloc::format!(
-            "[DBG] LOAD seg vaddr=0x{:x} filesz=0x{:x} memsz=0x{:x} flags=0x{:x}",
-            ph.p_vaddr,
-            ph.p_filesz,
-            ph.p_memsz,
-            ph.p_flags
-        ));
-
         let virt_base = load_base + ph.p_vaddr;
         let virt_end = virt_base + ph.p_memsz;
         let first_page = virt_base & !(PAGE_SIZE - 1);
@@ -216,45 +200,75 @@ pub unsafe fn spawn_user_process(
 
         let mut page = first_page;
         while page < last_page {
-            let frame = pmm.allocate_frame().expect("OOM: user segment");
-            serial::line(&alloc::format!(
-                "[DBG] frame=0x{:x} for virt page 0x{:x}",
-                frame.address(),
-                page
-            ));
-            core::ptr::write_bytes(frame.address() as *mut u8, 0, PAGE_SIZE as usize);
-            serial::line("[DBG] zeroed");
-
-            // Copy file data that overlaps this page.
-            let page_offset_in_seg = page.saturating_sub(virt_base);
-            let file_start = (ph.p_offset + page_offset_in_seg) as usize;
-            let file_end = (ph.p_offset + ph.p_filesz) as usize;
-
-            if file_start < file_end && file_start < elf_bytes.len() {
-                let copy_len = (file_end - file_start)
-                    .min(PAGE_SIZE as usize)
-                    .min(elf_bytes.len() - file_start);
-                core::ptr::copy_nonoverlapping(
-                    elf_bytes.as_ptr().add(file_start),
-                    frame.address() as *mut u8,
-                    copy_len,
-                );
+            match pages.iter_mut().find(|(v, _)| *v == page) {
+                Some((_, existing)) => {
+                    let writable = (*existing & PAGE_WRITABLE != 0)
+                        || (flags & PAGE_WRITABLE != 0);
+                    let no_exec = (*existing & PAGE_NO_EXECUTE != 0)
+                        && (flags & PAGE_NO_EXECUTE != 0);
+                    let mut merged = *existing | flags;
+                    if writable {
+                        merged |= PAGE_WRITABLE;
+                    } else {
+                        merged &= !PAGE_WRITABLE;
+                    }
+                    if no_exec {
+                        merged |= PAGE_NO_EXECUTE;
+                    } else {
+                        merged &= !PAGE_NO_EXECUTE;
+                    }
+                    *existing = merged;
+                }
+                None => pages.push((page, flags)),
             }
-            serial::line("[DBG] copied");
-
-            map_into_table(user_p4_phys, page, frame.address(), flags, pmm);
-            serial::line("[DBG] mapped");
             page += PAGE_SIZE;
         }
-        serial::line("[DBG] segment done");
     }
 
-    serial::line("Userspace: Segments mapped");
+    // ── Pass 2: allocate, populate and map each page exactly once ────────────
+    // We also record each page's backing frame so PIE relocations can be
+    // applied afterwards through the kernel's identity map.
+    let mut page_frames: Vec<(u64, u64)> = Vec::new();
+    for &(page, flags) in &pages {
+        let frame = pmm.allocate_frame().expect("OOM: user segment");
+        let dst = frame.address();
+        page_frames.push((page, dst));
+        core::ptr::write_bytes(dst as *mut u8, 0, PAGE_SIZE as usize);
 
-    // ── Allocate and map user stack ───────────────────────────────────────────
+        for ph in loader.load_segments() {
+            if ph.p_filesz == 0 || ph.p_memsz == 0 {
+                continue;
+            }
+            let virt_base = load_base + ph.p_vaddr;
+            let virt_end = virt_base + ph.p_memsz;
+            let file_end = virt_base + ph.p_filesz;
+
+            // Intersection of [this segment] ∩ [this page] ∩ [file-backed part].
+            let start = virt_base.max(page);
+            let end = virt_end.min(page + PAGE_SIZE).min(file_end);
+            if start >= end {
+                continue;
+            }
+
+            let file_off = (ph.p_offset + (start - virt_base)) as usize;
+            let dst_off = (start - page) as usize;
+            let len = (end - start) as usize;
+            if file_off + len > elf_bytes.len() {
+                continue;
+            }
+            core::ptr::copy_nonoverlapping(
+                elf_bytes.as_ptr().add(file_off),
+                (dst as *mut u8).add(dst_off),
+                len,
+            );
+        }
+
+        map_into_table(user_p4_phys, page, dst, flags, pmm);
+    }
+
+    // ── Allocate and map the user stack ──────────────────────────────────────
     let stack_bottom = USER_STACK_TOP - USER_STACK_SIZE;
     let stack_flags = PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER_ACCESSIBLE | PAGE_NO_EXECUTE;
-
     let mut page = stack_bottom;
     while page < USER_STACK_TOP {
         let frame = pmm.allocate_frame().expect("OOM: user stack");
@@ -263,43 +277,35 @@ pub unsafe fn spawn_user_process(
         page += PAGE_SIZE;
     }
 
-    serial::line("Userspace: Stack mapped");
+    // ── Apply dynamic relocations (position-independent executable) ──────────
+    // The init binary is a PIE whose GOT slots are filled by R_X86_64_RELATIVE
+    // relocations.  At a non-zero load base every slot must become
+    // `load_base + addend`; leaving them zero makes every indirect call jump to
+    // address 0 (the Ring-3 instruction-fetch fault we used to see on `cat`).
+    let mut reloc_count = 0usize;
+    for rela in loader.relocations() {
+        if rela.r_type() != R_X86_64_RELATIVE {
+            continue;
+        }
+        let target = load_base.wrapping_add(rela.r_offset);
+        let value = load_base.wrapping_add(rela.r_addend as u64);
+        if let Some(&(_, phys)) =
+            page_frames.iter().find(|(v, _)| target >= *v && target < *v + PAGE_SIZE)
+        {
+            let phys_addr = phys + (target & (PAGE_SIZE - 1));
+            core::ptr::write_unaligned(phys_addr as *mut u64, value);
+            reloc_count += 1;
+        }
+    }
 
-    // ── Update TSS + MSR syscall kernel stack ─────────────────────────────────
-    gdt::set_tss_stack(kernel_stack_top);
-    syscall::SYSCALL_KERNEL_STACK = kernel_stack_top;
+    serial::line(&alloc::format!(
+        "Userspace: image ready (segments + stack mapped, {} relocations applied)",
+        reloc_count
+    ));
 
-    // ── Switch CR3 to the user process page table ────────────────────────────
-    serial::line("Userspace: Switching CR3...");
-    asm!("mov cr3, {}", in(reg) user_p4_phys, options(nostack, preserves_flags));
-
-    serial::line("Userspace: Entering Ring 3 via iretq...");
-
-    // ── Build iretq frame and drop to Ring 3 ─────────────────────────────────
-    // Stack layout pushed in reverse: SS, RSP, RFLAGS, CS, RIP
-    let user_rsp = USER_STACK_TOP - 8; // 16-byte aligned after the `call` that iretq fakes.
-    let rflags: u64 = 0x202; // IF=1, reserved bit 1.
-
-    asm!(
-        "mov rsp, {kstack}",
-        "push {ss}",
-        "push {user_rsp}",
-        "push {rflags}",
-        "push {cs}",
-        "push {entry}",
-        // Zero all GPRs to avoid leaking kernel data into userspace.
-        "xor rax, rax", "xor rbx, rbx", "xor rcx, rcx", "xor rdx, rdx",
-        "xor rsi, rsi", "xor rdi, rdi",
-        "xor r8,  r8",  "xor r9,  r9",  "xor r10, r10", "xor r11, r11",
-        "xor r12, r12", "xor r13, r13", "xor r14, r14", "xor r15, r15",
-        "xor rbp, rbp",
-        "iretq",
-        kstack   = in(reg) kernel_stack_top - 8,
-        ss       = in(reg) USER_DATA_SEL,
-        user_rsp = in(reg) user_rsp,
-        rflags   = in(reg) rflags,
-        cs       = in(reg) USER_CODE_SEL,
-        entry    = in(reg) entry,
-        options(noreturn)
-    )
+    UserImage {
+        cr3: user_p4_phys,
+        entry,
+        user_rsp: USER_STACK_TOP - 16,
+    }
 }

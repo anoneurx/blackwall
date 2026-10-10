@@ -81,7 +81,7 @@ pub fn read_datetime() -> DateTime {
     // SAFETY: RTC_STATUS_B (0x0B) is a read-only configuration register.
     let status_b = unsafe { cmos_read(RTC_STATUS_B) };
     let binary_mode = (status_b & 0x04) != 0;
-    let hour_24 = (status_b & 0x02) != 0;
+    let _hour_24 = (status_b & 0x02) != 0;
 
     let (s, m, h, wd, d, mo, y, c) = if binary_mode {
         (s, m, h, wd, d, mo, y, c)

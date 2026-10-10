@@ -32,7 +32,6 @@ pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> u64 {
         let buf = unsafe { slice::from_raw_parts_mut(buf_ptr as *mut u8, len as usize) };
         let mut read_len = 0;
         while (read_len as u64) < len {
-            // Spin until we get a byte
             if let Some(mut b) = serial::read_byte() {
                 if b == b'\r' {
                     b = b'\n';
@@ -48,6 +47,14 @@ pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> u64 {
 
                 if b == b'\n' {
                     break;
+                }
+            } else {
+                // No byte yet: let the timer tick (and other tasks) run while
+                // we wait instead of spinning with interrupts disabled.
+                unsafe {
+                    crate::arch::x86_64::interrupts::enable();
+                    core::arch::asm!("hlt", options(nomem, nostack, preserves_flags));
+                    crate::arch::x86_64::interrupts::disable();
                 }
             }
         }

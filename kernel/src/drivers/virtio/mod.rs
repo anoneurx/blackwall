@@ -5,9 +5,7 @@ extern crate alloc;
 pub mod block;
 pub mod net;
 
-use crate::arch::x86_64::serial;
-use crate::drivers::pci::{PciBar, PciDevice};
-use alloc::vec::Vec;
+use crate::drivers::pci::PciDevice;
 use core::sync::atomic::{fence, Ordering};
 
 // VirtIO PCI capability types

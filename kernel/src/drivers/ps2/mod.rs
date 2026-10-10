@@ -18,6 +18,7 @@ const PS2_INPUT_FULL: u8 = 0x02;
 const CMD_DISABLE_PORT1: u8 = 0xAD;
 const CMD_ENABLE_PORT1: u8 = 0xAE;
 const CMD_DISABLE_PORT2: u8 = 0xA7;
+#[allow(dead_code)]
 const CMD_ENABLE_PORT2: u8 = 0xA8;
 const CMD_TEST_PS2: u8 = 0xAA;
 const CMD_TEST_PORT1: u8 = 0xAB;
@@ -26,8 +27,11 @@ const CMD_WRITE_CFG: u8 = 0x60;
 
 // Keyboard commands
 const KBD_RESET: u8 = 0xFF;
+#[allow(dead_code)]
 const KBD_ACK: u8 = 0xFA;
+#[allow(dead_code)]
 const KBD_SET_LEDS: u8 = 0xED;
+#[allow(dead_code)]
 const KBD_SET_SCANCODE: u8 = 0xF0;
 const KBD_ENABLE: u8 = 0xF4;
 

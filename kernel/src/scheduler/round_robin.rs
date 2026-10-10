@@ -1,26 +1,21 @@
-use crate::arch::x86_64::serial;
+use crate::arch::x86_64::trap::{switch_cr3, IrqFrame};
 use crate::process::manager::ProcessManager;
-use crate::process::pcb::DEFAULT_STACK_SIZE;
 use crate::process::state::ProcessState;
-use crate::scheduler::{context_switch, queue::RunQueue};
+use crate::scheduler::queue::RunQueue;
+use core::ptr;
 
 /// Number of PIT ticks per scheduling quantum.
 ///
 /// At 100 Hz (10 ms/tick) this gives ~100 ms time slices.
-/// Reduce for finer-grained preemption; increase for lower overhead.
 pub const TIME_SLICE_TICKS: u64 = 10;
 
 /// The round-robin scheduler.
 ///
-/// Owns the process table and the run queue.  The timer ISR calls `tick()`
-/// on every PIT interrupt; the scheduler calls `schedule()` once per
-/// quantum boundary.
-///
-/// # Single-CPU note
-///
-/// This implementation assumes a single CPU.  `current_pid` is the only
-/// notion of "what is running now".  SMP would require per-CPU run queues
-/// and IPI-based migrations.
+/// Owns the process table and the run queue.  There is deliberately **no**
+/// stack-switching code in here: a switch is expressed purely as "return a
+/// different trap frame to the common `iretq` epilogue" ([`Self::reschedule`]).
+/// That makes the scheduler usable from an IRQ, from a syscall and from a
+/// voluntary yield with one implementation.
 pub struct RoundRobinScheduler {
     manager: ProcessManager,
     queue: RunQueue,
@@ -40,52 +35,189 @@ impl RoundRobinScheduler {
         }
     }
 
+    /// Enable scheduling.  Must be called once every task that should be
+    /// runnable has been created.
+    pub fn start(&mut self, current_pid: u16) {
+        self.current_pid = current_pid;
+        self.started = true;
+    }
+
+    pub fn started(&self) -> bool {
+        self.started
+    }
+
     // -----------------------------------------------------------------------
-    // Public interface used by the timer ISR
+    // Entry points used by the trap dispatchers
     // -----------------------------------------------------------------------
 
-    /// Called from the PIT ISR on every timer tick.
+    /// Called from the IRQ0 trap on every tick.
     ///
-    /// Responsibilities:
-    /// 1. Wake sleeping tasks whose deadline has passed.
-    /// 2. Increment the running task's tick count.
-    /// 3. Trigger a `schedule()` call at each quantum boundary.
-    pub fn tick(&mut self, current_ticks: u64) {
+    /// Wakes sleepers, accounts CPU time and — at a quantum boundary or when
+    /// the current task stopped being runnable — picks the next frame.
+    pub fn on_timer_tick(&mut self, ticks: u64, frame: *mut IrqFrame) -> *mut IrqFrame {
         if !self.started {
-            return;
+            return ptr::null_mut();
         }
 
-        // Wake any sleeping tasks whose deadline has been reached.
-        self.wake_sleeping(current_ticks);
+        self.wake_sleeping(ticks);
 
-        // Charge one tick to the current task.
+        // SAFETY: the frame pointer comes from the live trap entry.
+        unsafe {
+            self.manager.reap_zombies();
+        }
+
         if let Some(pcb) = self.manager.get_mut(self.current_pid) {
             if pcb.state == ProcessState::Running {
                 pcb.ticks_run = pcb.ticks_run.saturating_add(1);
             }
         }
 
-        // Preempt at quantum boundaries.
-        if current_ticks % TIME_SLICE_TICKS == 0 {
-            self.schedule();
+        let current_state = self.manager.get(self.current_pid).map(|p| p.state);
+        let runnable = matches!(current_state, Some(ProcessState::Running) | Some(ProcessState::Ready));
+        let quantum_expired = ticks % TIME_SLICE_TICKS == 0;
+
+        if !runnable {
+            // The task blocked or exited — hand over immediately.
+            self.reschedule(frame, true)
+        } else if quantum_expired {
+            self.reschedule(frame, false)
+        } else {
+            ptr::null_mut()
         }
     }
 
+    /// Decide whether to switch tasks and, if so, return the frame to resume.
+    ///
+    /// * `frame`  — the live frame of the current task (saved if we switch).
+    /// * `force`  — switch even if the current task is still runnable (used by
+    ///              blocking syscalls, `exit` and voluntary yields).
+    ///
+    /// A `null` return means "keep running the caller's frame".
+    pub fn reschedule(&mut self, frame: *mut IrqFrame, force: bool) -> *mut IrqFrame {
+        if !self.started {
+            return ptr::null_mut();
+        }
+
+        let old_pid = self.current_pid;
+        let old_state = self.manager.get(old_pid).map(|p| p.state);
+        let old_runnable =
+            matches!(old_state, Some(ProcessState::Running) | Some(ProcessState::Ready));
+
+        if !force && old_runnable && self.queue.is_empty() {
+            // Nobody else wants the CPU.
+            self.save_frame(old_pid, frame);
+            return ptr::null_mut();
+        }
+
+        let Some(next_pid) = self.pick_next(old_pid) else {
+            if old_runnable {
+                self.save_frame(old_pid, frame);
+                return ptr::null_mut();
+            }
+            // Nothing runnable at all — keep the CPU on the current frame
+            // rather than returning to a task that will just fault again.
+            return ptr::null_mut();
+        };
+
+        if next_pid == old_pid {
+            self.save_frame(old_pid, frame);
+            return ptr::null_mut();
+        }
+
+        // Park the outgoing task.
+        if let Some(old_pcb) = self.manager.get_mut(old_pid) {
+            old_pcb.stack_ptr = frame as u64;
+            if old_pcb.state == ProcessState::Running {
+                old_pcb.state = ProcessState::Ready;
+                if !self.queue.contains(old_pid) {
+                    self.queue.enqueue(old_pid);
+                }
+            }
+        }
+
+        // Activate the incoming task.
+        let (next_frame, kstack, cr3) = match self.manager.get_mut(next_pid) {
+            Some(pcb) => {
+                pcb.state = ProcessState::Running;
+                (pcb.stack_ptr, pcb.kernel_stack_top(), pcb.cr3)
+            }
+            None => return ptr::null_mut(),
+        };
+
+        self.current_pid = next_pid;
+
+        if next_frame == 0 {
+            return ptr::null_mut();
+        }
+
+        // Per-task ring-3 → ring-0 stacks and address space.
+        unsafe {
+            if kstack != 0 {
+                crate::arch::x86_64::gdt::set_tss_stack(kstack);
+                crate::arch::x86_64::syscall::SYSCALL_KERNEL_STACK = kstack;
+            }
+            if cr3 != 0 {
+                switch_cr3(cr3);
+            }
+        }
+
+        next_frame as *mut IrqFrame
+    }
+
     // -----------------------------------------------------------------------
-    // Public interface used by thread helpers
+    // Public interface used by kernel threads and syscalls
     // -----------------------------------------------------------------------
 
     /// Spawn a new kernel thread and enqueue it.
-    ///
-    /// Returns the assigned PID.
     pub fn spawn_kernel_thread(&mut self, name: &str, entry: fn(), priority: u8) -> u16 {
-        let pid = self.manager.spawn(name, entry, DEFAULT_STACK_SIZE, priority);
+        let pid = self.manager.spawn(name, entry, 32 * 1024, priority);
         self.queue.enqueue(pid);
         pid
     }
 
-    /// Mark a task as Sleeping until `current_ticks + duration`.
-    /// Removes it from the run queue so it won't be selected.
+    /// Register a user process whose frame has already been built.
+    ///
+    /// Returns the PID.
+    pub fn enqueue_task(&mut self, pid: u16) {
+        self.queue.enqueue(pid);
+    }
+
+    /// Create a user task, build its initial ring-3 frame and enqueue it.
+    ///
+    /// `kernel_stack_size` is the size of the private kernel stack used for
+    /// syscalls and ring-3 → ring-0 transitions.
+    pub fn spawn_user_task(
+        &mut self,
+        name: &str,
+        cr3: u64,
+        entry: u64,
+        user_rsp: u64,
+        priority: u8,
+        kernel_stack_size: usize,
+    ) -> u16 {
+        let (pid, kernel_stack_top) =
+            self.manager.spawn_user(name, cr3, priority, kernel_stack_size);
+        let frame = unsafe {
+            // SAFETY: the manager just allocated and zeroed this stack.
+            crate::scheduler::context_switch::init_user_frame(
+                kernel_stack_top,
+                entry,
+                user_rsp,
+                0,
+            )
+        };
+        if let Some(pcb) = self.manager.get_mut(pid) {
+            pcb.stack_ptr = frame;
+        }
+        crate::logging::print(format_args!(
+            "[SPAWN] pid={} entry={:#x} user_rsp={:#x} kstack_top={:#x} frame={:#x} cr3={:#x}\n",
+            pid, entry, user_rsp, kernel_stack_top, frame, cr3
+        ));
+        self.queue.enqueue(pid);
+        pid
+    }
+
+    /// Mark a task as Sleeping until `current_ticks + duration_ticks`.
     pub fn sleep_task(&mut self, pid: u16, duration_ticks: u64, current_ticks: u64) {
         if let Some(pcb) = self.manager.get_mut(pid) {
             pcb.state = ProcessState::Sleeping;
@@ -95,8 +227,6 @@ impl RoundRobinScheduler {
     }
 
     /// Forcefully terminate a task: mark as Zombie, remove from run queue.
-    /// The caller is responsible for eventually freeing the stack via
-    /// `free_zombie_stack`.
     pub fn terminate_task(&mut self, pid: u16) {
         if let Some(pcb) = self.manager.get_mut(pid) {
             pcb.state = ProcessState::Zombie;
@@ -104,10 +234,9 @@ impl RoundRobinScheduler {
         self.queue.remove(pid);
     }
 
-    /// Free the heap-allocated stack of a Zombie task.
+    /// Free the heap-allocated kernel stack of a terminated task.
     ///
     /// # Safety
-    ///
     /// The task must not be executing and must be in the Zombie state.
     pub unsafe fn free_zombie_stack(&mut self, pid: u16) {
         self.manager.free_stack(pid);
@@ -116,123 +245,54 @@ impl RoundRobinScheduler {
         }
     }
 
-    /// Immutable access to the process manager (for inspection / logging).
+    /// Immutable view of the process manager.
     pub fn manager(&self) -> &ProcessManager {
         &self.manager
     }
 
-    /// Mutable access to the process manager (for fd table operations).
+    /// Mutable view of the process manager.
     pub fn manager_mut(&mut self) -> &mut ProcessManager {
         &mut self.manager
-    }
-
-    // -----------------------------------------------------------------------
-    // Entry point — called once after spawning idle + init tasks
-    // -----------------------------------------------------------------------
-
-    /// Start the scheduler by running the idle task.
-    ///
-    /// This function never returns.  It marks the idle task (PID 0) as
-    /// Running, sets the `started` flag so timer ticks are honoured, and
-    /// then drops into a fake "previous context" that jumps straight to
-    /// the idle task's stack.
-    pub fn run(&mut self) -> ! {
-        serial::line("Scheduler Started");
-
-        // Mark PID 0 (idle) as the initial running task.
-        if let Some(pcb) = self.manager.get_mut(0) {
-            pcb.state = ProcessState::Running;
-        }
-        self.queue.remove(0); // idle is Running, not in the ready queue.
-
-        self.started = true;
-
-        // We jump to the idle task's stack by loading its rsp and returning
-        // into it.  We use a dummy `old_rsp` location on the current
-        // (boot) stack since we will never return to this stack frame again.
-        let idle_rsp = self.manager.get(0).map(|p| p.stack_ptr).unwrap_or(0);
-        let mut dummy_rsp: u64 = 0;
-
-        // SAFETY: idle_rsp was initialised by `init_stack` and is valid.
-        unsafe {
-            context_switch::switch_to(&mut dummy_rsp as *mut u64, idle_rsp);
-        }
-
-        // Unreachable, but the type system needs a `!` return.
-        loop {
-            context_switch::cpu_relax();
-        }
     }
 
     // -----------------------------------------------------------------------
     // Internal scheduling logic
     // -----------------------------------------------------------------------
 
-    /// Select the next ready task and switch to it.
-    ///
-    /// If the run queue is empty, keeps running the current task (or idle).
-    pub fn schedule(&mut self) {
-        // Try to pick the next task from the run queue.
-        let Some(next_pid) = self.queue.dequeue() else {
-            // Nothing else to run — keep the current task going.
-            // If the current task somehow disappeared, fall back to idle.
-            return;
-        };
+    fn save_frame(&mut self, pid: u16, frame: *mut IrqFrame) {
+        if let Some(pcb) = self.manager.get_mut(pid) {
+            pcb.stack_ptr = frame as u64;
+        }
+    }
 
-        let old_pid = self.current_pid;
-
-        // Re-enqueue the old task if it is still runnable.
-        if old_pid != next_pid {
-            if let Some(old_pcb) = self.manager.get_mut(old_pid) {
-                if old_pcb.state == ProcessState::Running {
-                    old_pcb.state = ProcessState::Ready;
-                    self.queue.enqueue(old_pid);
+    /// Take the next runnable task off the run queue (excluding `old_pid`).
+    fn pick_next(&mut self, old_pid: u16) -> Option<u16> {
+        while let Some(pid) = self.queue.dequeue() {
+            if pid == old_pid {
+                // Put it back — we only want a *different* task here.
+                if !self.queue.contains(pid) {
+                    self.queue.enqueue(pid);
                 }
+                // If that was the only task, the loop ends after the queue
+                // drained; break out to the scan below.
+                break;
             }
-        }
-
-        // Activate the next task.
-        if let Some(next_pcb) = self.manager.get_mut(next_pid) {
-            next_pcb.state = ProcessState::Running;
-        }
-        self.current_pid = next_pid;
-
-        // Collect the stack pointers we need before the switch.
-        let old_rsp_ptr = self
-            .manager
-            .get_mut(old_pid)
-            .map(|p| &mut p.stack_ptr as *mut u64)
-            .unwrap_or(core::ptr::null_mut());
-
-        let next_rsp = self.manager.get(next_pid).map(|p| p.stack_ptr).unwrap_or(0);
-
-        if old_rsp_ptr.is_null() || next_rsp == 0 {
-            return;
-        }
-
-        // Set the TSS RSP0 for the incoming thread.
-        let next_stack_base = self
-            .manager
-            .get(next_pid)
-            .map(|p| p.stack_base as u64 + p.stack_size as u64)
-            .unwrap_or(0);
-        if next_stack_base != 0 {
-            unsafe {
-                crate::arch::x86_64::gdt::set_tss_stack(next_stack_base);
-                crate::arch::x86_64::syscall::SYSCALL_KERNEL_STACK = next_stack_base;
+            let state = self.manager.get(pid).map(|p| p.state);
+            if matches!(state, Some(ProcessState::Ready) | Some(ProcessState::Running)) {
+                return Some(pid);
             }
+            // Stale queue entry (sleeping/terminated) — drop it and continue.
         }
 
-        // Perform the actual register save/restore.
-        // SAFETY: Both pointers are valid PCB fields from our owned table.
-        unsafe {
-            context_switch::switch_to(old_rsp_ptr, next_rsp);
-        }
+        // Fallback: a runnable task that somehow missed the queue.
+        self.manager
+            .iter()
+            .find(|p| p.pid != old_pid && p.state == ProcessState::Ready)
+            .map(|p| p.pid)
     }
 
     /// Move any sleeping task past its deadline back to the run queue.
     fn wake_sleeping(&mut self, current_ticks: u64) {
-        // Collect PIDs to wake (avoid borrow-checker conflicts).
         let mut to_wake: [u16; 64] = [0; 64];
         let mut count = 0usize;
 

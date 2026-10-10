@@ -85,6 +85,7 @@ impl AhciPort {
     /// # Safety
     /// Same preconditions as `read32`. `write_volatile` ensures the store
     /// reaches the AHCI controller hardware without compiler reordering.
+    #[allow(dead_code)]
     unsafe fn write32(&self, off: usize, val: u32) {
         // SAFETY: As per read32 — valid BAR5 MMIO region, volatile write.
         core::ptr::write_volatile((self.port_base() + off) as *mut u32, val);
@@ -98,13 +99,13 @@ impl AhciPort {
     }
 
     /// Stub read: fills buf with zeros (real impl would submit FIS and await DMA)
-    pub fn read_sectors(&self, lba: u64, count: u16, buf: &mut [u8]) -> bool {
+    pub fn read_sectors(&self, _lba: u64, _count: u16, buf: &mut [u8]) -> bool {
         buf.fill(0);
         true
     }
 
     /// Stub write
-    pub fn write_sectors(&self, lba: u64, count: u16, buf: &[u8]) -> bool {
+    pub fn write_sectors(&self, _lba: u64, _count: u16, _buf: &[u8]) -> bool {
         true
     }
 }
@@ -168,3 +169,7 @@ pub fn init(mmio_base: u64) -> Option<AhciController> {
     serial::line(&alloc::format!("[AHCI] Found {} SATA port(s).", ctrl.ports.len()));
     Some(ctrl)
 }
+
+/// The enumerated AHCI controller, if one is present on this machine.
+pub static AHCI_CONTROLLER: crate::sync::SpinLock<Option<AhciController>> =
+    crate::sync::SpinLock::new(None);

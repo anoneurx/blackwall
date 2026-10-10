@@ -18,6 +18,7 @@ pub static CPU_TABLE: crate::sync::spin::SpinLock<Vec<Cpu>> =
     crate::sync::spin::SpinLock::new(Vec::new());
 
 // MADT signature for locating the APIC table in ACPI
+#[allow(dead_code)]
 const MADT_SIGNATURE: [u8; 4] = *b"APIC";
 
 /// Probe the MADT to enumerate all Local APICs (logical CPUs).

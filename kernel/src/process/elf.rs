@@ -17,6 +17,10 @@ pub const PF_X: u32 = 1;
 pub const PF_W: u32 = 2;
 pub const PF_R: u32 = 4;
 
+pub const SHT_RELA: u32 = 4;
+/// `R_X86_64_RELATIVE`: `*r_offset = load_base + r_addend`.
+pub const R_X86_64_RELATIVE: u32 = 8;
+
 // ─── ELF64 structures ───────────────────────────────────────────────────────
 
 #[repr(C)]
@@ -47,6 +51,45 @@ pub struct Elf64Phdr {
     pub p_filesz: u64,
     pub p_memsz: u64,
     pub p_align: u64,
+}
+
+/// ELF64 section header (only the fields the loader needs).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Elf64Shdr {
+    pub sh_name: u32,
+    pub sh_type: u32,
+    pub sh_flags: u64,
+    pub sh_addr: u64,
+    pub sh_offset: u64,
+    pub sh_size: u64,
+    pub sh_link: u32,
+    pub sh_info: u32,
+    pub sh_addralign: u64,
+    pub sh_entsize: u64,
+}
+
+/// ELF64 RELA relocation entry.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Elf64Rela {
+    pub r_offset: u64,
+    pub r_info: u64,
+    pub r_addend: i64,
+}
+
+impl Elf64Rela {
+    /// ELF64 relocation type: the **low** 32 bits of `r_info`.
+    pub fn r_type(&self) -> u32 {
+        (self.r_info & 0xffff_ffff) as u32
+    }
+}
+
+impl Elf64Rela {
+    /// Relocation type (high 32 bits of `r_info`).
+    pub fn reloc_type(&self) -> u32 {
+        (self.r_info >> 32) as u32
+    }
 }
 
 // ─── Parser ─────────────────────────────────────────────────────────────────
@@ -109,5 +152,49 @@ impl<'a> ElfLoader<'a> {
 
     pub fn load_segments(&self) -> impl Iterator<Item = &'a Elf64Phdr> {
         self.program_headers().filter(|ph| ph.p_type == PT_LOAD)
+    }
+
+    /// Iterate the section headers (returned by value; a section header is
+    /// small and may be unaligned in the file image).
+    pub fn section_headers(&self) -> impl Iterator<Item = Elf64Shdr> + '_ {
+        let shoff = self.header.e_shoff as usize;
+        let shentsize = self.header.e_shentsize as usize;
+        let shnum = self.header.e_shnum as usize;
+        let data = self.data;
+
+        (0..shnum).filter_map(move |i| {
+            let offset = shoff + i * shentsize;
+            if shentsize == 0 || offset + core::mem::size_of::<Elf64Shdr>() > data.len() {
+                None
+            } else {
+                // SAFETY: bounds-checked above; read_unaligned tolerates any
+                // alignment of the section header within the file image.
+                Some(unsafe {
+                    core::ptr::read_unaligned(data.as_ptr().add(offset) as *const Elf64Shdr)
+                })
+            }
+        })
+    }
+
+    /// Iterate every relocation entry in every `SHT_RELA` section.
+    pub fn relocations(&self) -> impl Iterator<Item = Elf64Rela> + '_ {
+        let data = self.data;
+        self.section_headers().filter(|s| s.sh_type == SHT_RELA).flat_map(move |s| {
+            let entsize = s.sh_entsize as usize;
+            let count = if entsize == 0 { 0 } else { (s.sh_size as usize) / entsize };
+            let base = s.sh_offset as usize;
+            (0..count).filter_map(move |i| {
+                let offset = base + i * entsize;
+                if offset + core::mem::size_of::<Elf64Rela>() > data.len() {
+                    None
+                } else {
+                    // SAFETY: bounds-checked above; read_unaligned tolerates
+                    // any alignment of the relocation within the file image.
+                    Some(unsafe {
+                        core::ptr::read_unaligned(data.as_ptr().add(offset) as *const Elf64Rela)
+                    })
+                }
+            })
+        })
     }
 }

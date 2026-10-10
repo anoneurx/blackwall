@@ -2,10 +2,7 @@
 /// Reads and writes 512-byte sectors via virtqueue requests.
 extern crate alloc;
 
-use super::{VirtqDesc, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
 use crate::arch::x86_64::serial;
-use alloc::boxed::Box;
-use alloc::vec::Vec;
 
 /// VirtIO block request types
 pub const VIRTIO_BLK_T_IN: u32 = 0; // Read
@@ -52,7 +49,7 @@ impl VirtioBlock {
     }
 
     /// Write a 512-byte sector to the block device.
-    pub fn write_sector(&self, lba: u64, buf: &[u8; 512]) -> bool {
+    pub fn write_sector(&self, lba: u64, _buf: &[u8; 512]) -> bool {
         if lba >= self.capacity {
             serial::line("[VIRTIO-BLK] write_sector: LBA out of range");
             return false;

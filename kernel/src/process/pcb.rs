@@ -8,6 +8,9 @@ use alloc::vec::Vec;
 pub const DEFAULT_STACK_SIZE: usize = 64 * 1024;
 /// Maximum number of open files per process.
 pub const MAX_FDS: usize = 64;
+/// FDs 0 (stdin), 1 (stdout) and 2 (stderr) are handled directly by the
+/// syscall layer and are never handed out by [`ProcessControlBlock::alloc_fd`].
+pub const FD_RESERVED: usize = 3;
 
 /// Represents a file descriptor entry.  `None` = slot is free.
 pub type FdTable = Vec<Option<OpenFile>>;
@@ -37,6 +40,12 @@ pub struct ProcessControlBlock {
     pub sleep_until: u64,
     /// Per-process open file descriptor table.
     pub fd_table: FdTable,
+    /// Physical address of this task's page table (0 = boot page table).
+    pub cr3: u64,
+    /// Parent PID (0 for kernel tasks and init).
+    pub parent: u16,
+    /// Exit status recorded by `exit`/`wait`.
+    pub exit_status: i64,
 }
 
 // SAFETY: PCBs are only mutated while holding the global scheduler lock.
@@ -69,13 +78,28 @@ impl ProcessControlBlock {
             ticks_run: 0,
             sleep_until: 0,
             fd_table,
+            cr3: 0,
+            parent: 0,
+            exit_status: 0,
+        }
+    }
+
+    /// Top of this task's private kernel stack (0 when the task has none —
+    /// the boot context, which never returns to ring 3 and never syscalls).
+    pub fn kernel_stack_top(&self) -> u64 {
+        if self.stack_base.is_null() || self.stack_size == 0 {
+            0
+        } else {
+            self.stack_base as u64 + self.stack_size as u64
         }
     }
 
     /// Allocate the next free file descriptor and install `file` there.
     /// Returns the fd number or `Err` if the table is full.
     pub fn alloc_fd(&mut self, file: OpenFile) -> Result<u64, VfsError> {
-        for (i, slot) in self.fd_table.iter_mut().enumerate() {
+        // Skip the reserved stdin/stdout/stderr slots so the first real file
+        // gets fd 3 — handing out fd 0 would make `open` collide with stdin.
+        for (i, slot) in self.fd_table.iter_mut().enumerate().skip(FD_RESERVED) {
             if slot.is_none() {
                 *slot = Some(file);
                 return Ok(i as u64);
