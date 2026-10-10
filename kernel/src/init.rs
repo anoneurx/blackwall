@@ -109,6 +109,25 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     // Drivers run with IRQs masked; allow the PS/2 keyboard through now.
     timer::unmask_keyboard();
 
+    // ── Mount a persistent Ext2 from the AHCI data disk (if present) ─────────
+    crate::fs::mount_disk();
+    {
+        let mut buf = alloc::vec![0u8; 256];
+        let got = {
+            let vfs = crate::fs::vfs::VFS.lock();
+            let mgr = vfs.as_ref().expect("VFS not initialized");
+            match mgr.resolve_path("/mnt/hello.txt") {
+                Ok(vnode) => vnode.fs.read(vnode.inode, &mut buf, 0).ok(),
+                Err(_) => None,
+            }
+        };
+        if let Some(len) = got {
+            if let Ok(s) = core::str::from_utf8(&buf[..len]) {
+                serial::line(&alloc::format!("[DEBUG] /mnt/hello.txt: {}", s.trim_end()));
+            }
+        }
+    }
+
     // ── Initialize Network Stack (Phase 9) ───────────────────────────────────
     crate::net::init();
 

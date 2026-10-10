@@ -51,7 +51,16 @@ pub fn init() {
             };
 
             if let Some(addr) = mmio_addr {
+                dev.enable_bus_master();
                 if let Some(ctrl) = ahci::init(addr) {
+                    if let Some(disk) = ahci::find_data_disk(&ctrl) {
+                        serial::line(&alloc::format!(
+                            "[DRIVERS] AHCI data disk: {} sectors ({} MiB)",
+                            disk.num_sectors(),
+                            disk.num_bytes() / 1024 / 1024
+                        ));
+                        *ahci::AHCI_DISK.lock() = Some(disk);
+                    }
                     *ahci::AHCI_CONTROLLER.lock() = Some(ctrl);
                 }
             } else {

@@ -23,6 +23,16 @@ pub struct PciDevice {
 }
 
 impl PciDevice {
+    /// Enable I/O + memory space decoding and bus-master (DMA) for this device.
+    /// Required before a storage controller may perform DMA.
+    pub fn enable_bus_master(&self) {
+        let cmd = pci_read(self.bus, self.slot, self.func, 0x04);
+        let new = cmd | 0x02 /* Memory Space */ | 0x04 /* Bus Master */;
+        if new != cmd {
+            pci_write(self.bus, self.slot, self.func, 0x04, new);
+        }
+    }
+
     pub fn get_bar(&self, bar_idx: u8) -> PciBar {
         if bar_idx >= 6 {
             return PciBar::None;
@@ -85,6 +95,20 @@ pub fn pci_read(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
     unsafe {
         outd(0xCF8, address);
         ind(0xCFC)
+    }
+}
+
+pub fn pci_write(bus: u8, slot: u8, func: u8, offset: u8, value: u32) {
+    let address = 0x8000_0000u32
+        | ((bus as u32) << 16)
+        | ((slot as u32) << 11)
+        | ((func as u32) << 8)
+        | ((offset as u32) & 0xFC);
+    // SAFETY: 0xCF8/0xCFC are the universal x86 PCI config address/data ports;
+    // the offset is masked to a 32-bit aligned register.
+    unsafe {
+        outd(0xCF8, address);
+        outd(0xCFC, value);
     }
 }
 
