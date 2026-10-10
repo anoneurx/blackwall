@@ -22,6 +22,28 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
     let a1 = f.rsi;
     let a2 = f.rdx;
 
+    // ── Security filter (allow-list) ───────────────────────────────────────
+    // Enforce the process-wide syscall policy before anything executes.
+    match crate::security::check_syscall(number) {
+        crate::security::FilterAction::Allow => {}
+        crate::security::FilterAction::Log => {
+            crate::logging::print(format_args!(
+                "[SECURITY] pid {} syscall {} logged\n",
+                crate::scheduler::current_pid(),
+                number
+            ));
+        }
+        crate::security::FilterAction::Kill => {
+            crate::logging::print(format_args!(
+                "[SECURITY] pid {} killed by filter: syscall {} (SIGSYS)\n",
+                crate::scheduler::current_pid(),
+                number
+            ));
+            // 128 + SIGSYS(31): classic seccomp termination status.
+            return process::sys_exit(frame, 128 + 31);
+        }
+    }
+
     let result = match number {
         SYS_READ => fs::sys_read(a0, a1, a2),
         SYS_WRITE => fs::sys_write(a0, a1, a2),

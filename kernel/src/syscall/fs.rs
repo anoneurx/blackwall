@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 
 use crate::arch::x86_64::serial;
-use crate::fs::vfs::{OpenFile, VFS, VfsError, VnodeType};
+use crate::fs::vfs::{OpenFile, VfsError, VnodeType, VFS};
 use crate::scheduler::SCHEDULER;
 use blackwall_shared::syscall::*;
 use core::slice;
@@ -163,7 +163,9 @@ pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> u64 {
 
 // ── sys_open ────────────────────────────────────────────────────────────────
 pub fn sys_open(path_ptr: u64, flags: u64) -> u64 {
-    let Some(path) = read_path(path_ptr) else { return ENOSYS as u64; };
+    let Some(path) = read_path(path_ptr) else {
+        return ENOSYS as u64;
+    };
     if path.is_empty() {
         return ENOSYS as u64;
     }
@@ -268,7 +270,9 @@ pub fn sys_lseek(fd: u64, offset: u64, whence: u64) -> u64 {
 
 // ── sys_mkdir ───────────────────────────────────────────────────────────────
 pub fn sys_mkdir(path_ptr: u64) -> u64 {
-    let Some(path) = read_path(path_ptr) else { return ENOSYS as u64; };
+    let Some(path) = read_path(path_ptr) else {
+        return ENOSYS as u64;
+    };
     if path.is_empty() {
         return ENOSYS as u64;
     }
@@ -284,7 +288,9 @@ pub fn sys_mkdir(path_ptr: u64) -> u64 {
 
 // ── sys_unlink ──────────────────────────────────────────────────────────────
 pub fn sys_unlink(path_ptr: u64) -> u64 {
-    let Some(path) = read_path(path_ptr) else { return ENOSYS as u64; };
+    let Some(path) = read_path(path_ptr) else {
+        return ENOSYS as u64;
+    };
     if path.is_empty() {
         return ENOSYS as u64;
     }
@@ -300,7 +306,9 @@ pub fn sys_unlink(path_ptr: u64) -> u64 {
 
 // ── sys_rmdir ───────────────────────────────────────────────────────────────
 pub fn sys_rmdir(path_ptr: u64) -> u64 {
-    let Some(path) = read_path(path_ptr) else { return ENOSYS as u64; };
+    let Some(path) = read_path(path_ptr) else {
+        return ENOSYS as u64;
+    };
     if path.is_empty() {
         return ENOSYS as u64;
     }
@@ -316,7 +324,9 @@ pub fn sys_rmdir(path_ptr: u64) -> u64 {
 
 // ── sys_readdir ─────────────────────────────────────────────────────────────
 pub fn sys_readdir(path_ptr: u64, buf_ptr: u64, len: u64) -> u64 {
-    let Some(path) = read_path(path_ptr) else { return ENOSYS as u64; };
+    let Some(path) = read_path(path_ptr) else {
+        return ENOSYS as u64;
+    };
     if path.is_empty() {
         return ENOSYS as u64;
     }
@@ -353,7 +363,9 @@ pub fn sys_readdir(path_ptr: u64, buf_ptr: u64, len: u64) -> u64 {
 
 // ── sys_stat ────────────────────────────────────────────────────────────────
 pub fn sys_stat(path_ptr: u64, size_ptr: u64, type_ptr: u64) -> u64 {
-    let Some(path) = read_path(path_ptr) else { return ENOSYS as u64; };
+    let Some(path) = read_path(path_ptr) else {
+        return ENOSYS as u64;
+    };
     if path.is_empty() {
         return ENOSYS as u64;
     }
