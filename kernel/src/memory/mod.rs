@@ -6,6 +6,7 @@ pub mod map;
 pub mod paging;
 pub mod physical;
 pub mod protection;
+pub mod user_access;
 pub mod r#virtual;
 
 use crate::logging;

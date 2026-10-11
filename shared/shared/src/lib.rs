@@ -147,6 +147,8 @@ pub mod syscall {
     pub const ENOTDIR: i64 = -20;
     pub const ENOTSUP: i64 = -95;
     pub const EAGAIN: i64 = -11;
+    pub const EFAULT: i64 = -14;
+    pub const EINVAL: i64 = -22;
 
     // SYS_NET operations — passed in `r0`.
     pub const NET_OP_STATE: u64 = 0;

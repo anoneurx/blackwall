@@ -23,27 +23,27 @@ fn err_of(e: VfsError) -> u64 {
 
 /// Read a NUL-terminated path from userspace (bounded at 511 bytes).
 ///
-/// # Safety
-/// `ptr` must point at a readable userspace buffer; we only scan forward until
-/// the NUL terminator or the 511-byte cap, never past the caller's guarantee.
+/// The pointer is validated with [`crate::memory::user_access::access_ok`]
+/// before any dereference; the scan never exceeds 511 bytes.
 fn read_path(ptr: u64) -> Option<String> {
     if ptr == 0 {
         return None;
     }
     let mut buf = [0u8; 512];
     let mut len = 0usize;
-    // SAFETY: same userspace ABI guarantee as the rest of the syscall layer —
-    // the caller promises a valid NUL-terminated string; we bound the scan.
-    unsafe {
-        let p = ptr as *const u8;
-        while len < 511 {
-            let b = *p.add(len);
-            if b == 0 {
-                break;
-            }
-            buf[len] = b;
-            len += 1;
+    while len < 511 {
+        // Validate each byte's page before touching it (the string may
+        // straddle a page boundary whose second page is unmapped).
+        if !crate::memory::user_access::access_ok(ptr + len as u64, 1, false) {
+            return None;
         }
+        // SAFETY: access_ok proved the byte is a mapped user page.
+        let b = unsafe { *((ptr + len as u64) as *const u8) };
+        if b == 0 {
+            break;
+        }
+        buf[len] = b;
+        len += 1;
     }
     core::str::from_utf8(&buf[..len]).ok().map(String::from)
 }
@@ -66,12 +66,13 @@ fn current_open_file(fd: u64) -> Option<OpenFile> {
 
 // ── sys_read ────────────────────────────────────────────────────────────────
 pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> u64 {
+    if !crate::memory::user_access::access_ok(buf_ptr, len, true) {
+        return EFAULT as u64;
+    }
     // fd 0 (stdin) reads from the serial port.
     if fd == 0 {
-        // SAFETY: The userspace syscall ABI guarantees that `buf_ptr` is a
-        // valid, non-null, writable region of at least `len` bytes within the
-        // calling process's address space. The kernel does not dereference
-        // this pointer after returning to userspace, preventing use-after-free.
+        // SAFETY: access_ok proved `[buf_ptr, buf_ptr+len)` is a mapped,
+        // writable user range for the duration of this call.
         let buf = unsafe { slice::from_raw_parts_mut(buf_ptr as *mut u8, len as usize) };
         let mut read_len = 0;
         while (read_len as u64) < len {
@@ -109,9 +110,7 @@ pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> u64 {
         None => return u64::MAX, // EBADF
     };
 
-    // SAFETY: Same ABI guarantee as the stdin branch above — `buf_ptr` is a
-    // caller-validated writable buffer of `len` bytes. The VFS read function
-    // only writes within `[0, len)` and does not retain the slice reference.
+    // SAFETY: access_ok proved `[buf_ptr, buf_ptr+len)` is a mapped user range.
     let buf = unsafe { slice::from_raw_parts_mut(buf_ptr as *mut u8, len as usize) };
     let offset = *open_file.offset.lock();
     match open_file.vnode.fs.read(open_file.vnode.inode, buf, offset) {
@@ -125,12 +124,12 @@ pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> u64 {
 
 // ── sys_write ───────────────────────────────────────────────────────────────
 pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> u64 {
+    if !crate::memory::user_access::access_ok(buf_ptr, len, false) {
+        return EFAULT as u64;
+    }
     // fd 1 (stdout) and fd 2 (stderr) go straight to the serial port.
     if fd == 1 || fd == 2 {
-        // SAFETY: `buf_ptr` points to a readable userspace buffer of `len`
-        // bytes. The syscall ABI contract requires that the caller ensures
-        // alignment (u8, so alignment = 1) and lifetime validity for the
-        // duration of the syscall. The slice is only read, not written.
+        // SAFETY: access_ok proved `[buf_ptr, buf_ptr+len)` is mapped.
         let buf = unsafe { slice::from_raw_parts(buf_ptr as *const u8, len as usize) };
         if let Ok(s) = core::str::from_utf8(buf) {
             serial::write_str(s);
@@ -144,9 +143,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> u64 {
         None => return u64::MAX, // EBADF
     };
 
-    // SAFETY: `buf_ptr` is a readable userspace buffer of `len` bytes per
-    // the syscall ABI. The VFS write function only reads within `[0, len)`
-    // and does not retain the slice after returning.
+    // SAFETY: access_ok proved `[buf_ptr, buf_ptr+len)` is a mapped user range.
     let buf = unsafe { slice::from_raw_parts(buf_ptr as *const u8, len as usize) };
     let mut offset = *open_file.offset.lock();
     if open_file.flags & O_APPEND != 0 {
@@ -181,8 +178,7 @@ pub fn sys_open(path_ptr: u64, flags: u64) -> u64 {
         if flags & O_CREAT != 0 {
             match mgr.resolve_path(&path) {
                 Ok(_) if trunc => {
-                    let _ = mgr.unlink(&path);
-                    if let Err(e) = mgr.create_file(&path) {
+                    if let Err(e) = mgr.truncate(&path) {
                         return err_of(e);
                     }
                 }
@@ -198,8 +194,9 @@ pub fn sys_open(path_ptr: u64, flags: u64) -> u64 {
                 return err_of(e);
             }
             if trunc {
-                let _ = mgr.unlink(&path);
-                let _ = mgr.create_file(&path);
+                if let Err(e) = mgr.truncate(&path) {
+                    return err_of(e);
+                }
             }
         }
 
@@ -342,7 +339,10 @@ pub fn sys_readdir(path_ptr: u64, buf_ptr: u64, len: u64) -> u64 {
         }
     };
 
-    // SAFETY: `buf_ptr` is a caller-validated writable buffer of `len` bytes.
+    if !crate::memory::user_access::access_ok(buf_ptr, len, true) {
+        return EFAULT as u64;
+    }
+    // SAFETY: access_ok proved `[buf_ptr, buf_ptr+len)` is a mapped user range.
     let buf = unsafe { slice::from_raw_parts_mut(buf_ptr as *mut u8, len as usize) };
     let mut written = 0usize;
     for entry in entries {
@@ -381,7 +381,13 @@ pub fn sys_stat(path_ptr: u64, size_ptr: u64, type_ptr: u64) -> u64 {
         }
     };
 
-    // SAFETY: `size_ptr` / `type_ptr` are caller-validated writable slots.
+    if size_ptr != 0 && !crate::memory::user_access::access_ok(size_ptr, 8, true) {
+        return EFAULT as u64;
+    }
+    if type_ptr != 0 && !crate::memory::user_access::access_ok(type_ptr, 1, true) {
+        return EFAULT as u64;
+    }
+    // SAFETY: both output pointers were validated with access_ok above.
     unsafe {
         if size_ptr != 0 {
             core::ptr::write_unaligned(size_ptr as *mut u64, size);
