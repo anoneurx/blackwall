@@ -91,16 +91,15 @@ impl NetworkStack {
     /// The destination MAC is taken from the ARP cache (the caller is expected
     /// to have issued an ARP request first).  Returns `Some(frame_len)` once
     /// the frame is handed to the NIC, or `None` if the neighbour is unknown.
-    pub fn send_echo_request(&mut self, target_ip: IpAddress, identifier: u16, sequence: u16) -> Option<usize> {
+    pub fn send_echo_request(
+        &mut self,
+        target_ip: IpAddress,
+        identifier: u16,
+        sequence: u16,
+    ) -> Option<usize> {
         let dest_mac = self.arp_table.lookup(target_ip)?;
-        let frame = build_echo_request(
-            &self.mac.0,
-            &dest_mac.0,
-            self.ip,
-            target_ip,
-            identifier,
-            sequence,
-        );
+        let frame =
+            build_echo_request(&self.mac.0, &dest_mac.0, self.ip, target_ip, identifier, sequence);
         self.pending_ping = Some((identifier, sequence));
         self.echo_reply_received = false;
         let len = frame.len();
@@ -117,14 +116,8 @@ impl NetworkStack {
         identifier: u16,
         sequence: u16,
     ) -> usize {
-        let frame = build_echo_request(
-            &self.mac.0,
-            &dest_mac.0,
-            self.ip,
-            target_ip,
-            identifier,
-            sequence,
-        );
+        let frame =
+            build_echo_request(&self.mac.0, &dest_mac.0, self.ip, target_ip, identifier, sequence);
         self.pending_ping = Some((identifier, sequence));
         self.echo_reply_received = false;
         let len = frame.len();
@@ -240,6 +233,11 @@ impl NetworkStack {
             Some(m) => m,
             None => return,
         };
+        // Reject corrupt messages: the checksum must validate to zero over
+        // the whole ICMP message (header + payload).
+        if crate::ipv4::compute_checksum(ip.payload) != 0 {
+            return;
+        }
         match msg.icmp_type {
             IcmpType::EchoRequest => {
                 let frame = build_echo_reply(&msg, &self.mac.0, &eth.src.0, self.ip, ip.src_ip);
@@ -259,6 +257,10 @@ impl NetworkStack {
             Some(s) => s,
             None => return,
         };
+        // Validate the TCP checksum over the pseudo-header + segment.
+        if crate::tcp::compute_tcp_checksum(ip.src_ip.0, ip.dest_ip.0, ip.payload) != 0 {
+            return;
+        }
         for sock in &mut self.tcp_sockets {
             if sock.local_port == seg.dest_port {
                 process_tcp_state(sock, &seg);
@@ -272,6 +274,11 @@ impl NetworkStack {
             Some(h) => h,
             None => return,
         };
+        // Validate the UDP checksum (IPv4 pseudo-header + datagram).
+        let datagram = &ip.payload[..hdr.length as usize];
+        if !UdpHeader::checksum_valid(ip.src_ip.0, self.ip.0, datagram) {
+            return;
+        }
         self.udp_pool.deliver(hdr.dest_port, ip.src_ip, hdr.src_port, hdr.payload);
     }
 }

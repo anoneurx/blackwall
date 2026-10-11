@@ -30,6 +30,9 @@ impl<'a> Ipv4Packet<'a> {
         }
         let version = (data[0] >> 4) & 0x0F;
         let ihl = data[0] & 0x0F;
+        if version != 4 || ihl < 5 {
+            return None;
+        }
         let tos = data[1];
         let total_len = ((data[2] as u16) << 8) | (data[3] as u16);
         let id = ((data[4] as u16) << 8) | (data[5] as u16);
@@ -47,7 +50,10 @@ impl<'a> Ipv4Packet<'a> {
         dest_ip.copy_from_slice(&data[16..20]);
 
         let header_len = (ihl * 4) as usize;
-        if data.len() < header_len || data.len() < total_len as usize {
+        if total_len < header_len as u16
+            || data.len() < header_len
+            || data.len() < total_len as usize
+        {
             return None;
         }
 

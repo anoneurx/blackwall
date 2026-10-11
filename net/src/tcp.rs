@@ -74,6 +74,9 @@ impl<'a> TcpSegment<'a> {
             | (data[11] as u32);
 
         let data_offset = (data[12] >> 4) & 0x0F;
+        if data_offset < 5 {
+            return None;
+        }
         let flags = data[13];
 
         let fin = (flags & 0x01) != 0;

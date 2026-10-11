@@ -68,11 +68,18 @@ pub fn init() {
 /// Receive one frame from the VirtIO NIC and process it through the stack.
 /// Called once per scheduler tick.
 pub fn poll() {
-    if let Some(ref mut nic) = *crate::drivers::virtio::net::VIRTIO_NET_DEVICE.lock() {
-        if let Some(packet) = nic.receive() {
-            if let Some(ref mut stack) = *NETWORK_STACK.lock() {
-                stack.handle_frame(&packet);
-            }
+    // Scope the NIC lock so it is released BEFORE handle_frame: the stack's
+    // transmit path re-acrupts VIRTIO_NET_DEVICE (self-deadlock otherwise).
+    let packet = {
+        if let Some(ref mut nic) = *crate::drivers::virtio::net::VIRTIO_NET_DEVICE.lock() {
+            nic.receive()
+        } else {
+            None
+        }
+    };
+    if let Some(packet) = packet {
+        if let Some(ref mut stack) = *NETWORK_STACK.lock() {
+            stack.handle_frame(&packet);
         }
     }
 }
