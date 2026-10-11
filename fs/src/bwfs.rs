@@ -253,6 +253,16 @@ impl FileSystem for BwFs {
         Ok(())
     }
 
+    fn truncate(&self, inode: u64) -> Result<(), VfsError> {
+        let nodes = self.nodes_mut();
+        let node = nodes
+            .iter_mut()
+            .find(|n| n.inode == inode && !n.is_dir)
+            .ok_or(VfsError::FileNotFound)?;
+        node.data.clear();
+        Ok(())
+    }
+
     fn get_root_inode(&self) -> u64 {
         1
     }

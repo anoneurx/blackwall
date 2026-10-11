@@ -116,6 +116,7 @@ const GD_USED_DIRS: usize = 0x10;
 // Inode byte offsets.
 const IN_MODE: usize = 0x00;
 const IN_SIZE: usize = 0x04;
+const IN_SIZE_HIGH: usize = 0x6C;
 const IN_LINKS: usize = 0x1A;
 const IN_BLOCKS: usize = 0x1C;
 const IN_BLOCK: usize = 0x28; // [u32; 15]
@@ -255,7 +256,11 @@ impl Ext2Fs {
         if rd16(&sb, SB_MAGIC) != EXT2_MAGIC {
             return Err(VfsError::IOError);
         }
-        let block_size = 1024u32 << rd32(&sb, SB_LOG_BLOCK_SIZE);
+        let log_block_size = rd32(&sb, SB_LOG_BLOCK_SIZE);
+        if log_block_size > 6 {
+            return Err(VfsError::IOError);
+        }
+        let block_size = 1024u32 << log_block_size;
         let inode_size = {
             let rev = rd32(&sb, SB_REV_LEVEL);
             if rev == 0 {
@@ -265,12 +270,20 @@ impl Ext2Fs {
                 if s == 0 {
                     128
                 } else {
-                    s as u32
+                    let s = s as u32;
+                    if s.is_power_of_two() && s >= 128 && s <= block_size {
+                        s
+                    } else {
+                        128
+                    }
                 }
             }
         };
         let inodes_count = rd32(&sb, SB_INODES_COUNT);
         let blocks_count = rd32(&sb, SB_BLOCKS_COUNT);
+        if inodes_count == 0 || blocks_count == 0 {
+            return Err(VfsError::IOError);
+        }
         let inodes_per_group = rd32(&sb, SB_INODES_PER_GROUP).max(1);
         let groups = inodes_count.div_ceil(inodes_per_group).max(1);
         Ok(Self {
@@ -332,6 +345,9 @@ impl Ext2Fs {
     }
 
     fn inode_offset(&self, ino: u64) -> Result<u64, VfsError> {
+        if ino == 0 {
+            return Err(VfsError::FileNotFound);
+        }
         let group = ((ino - 1) / self.inodes_per_group as u64) as u32;
         let index = ((ino - 1) % self.inodes_per_group as u64) as u64;
         if group >= self.groups {
@@ -339,7 +355,14 @@ impl Ext2Fs {
         }
         let gd = self.read_gd(group)?;
         let table = rd32(&gd, GD_INODE_TABLE) as u64;
-        Ok(table * self.block_size as u64 + index * self.inode_size as u64)
+        if table >= self.blocks_count as u64 {
+            return Err(VfsError::IOError);
+        }
+        let offset = table
+            .checked_mul(self.block_size as u64)
+            .and_then(|t| t.checked_add(index * self.inode_size as u64))
+            .ok_or(VfsError::IOError)?;
+        Ok(offset)
     }
 
     fn read_inode(&self, ino: u64) -> Result<Vec<u8>, VfsError> {
@@ -991,6 +1014,18 @@ impl FileSystem for Ext2Fs {
     fn get_root_inode(&self) -> u64 {
         EXT2_ROOT_INO
     }
+
+    fn truncate(&self, ino: u64) -> Result<(), VfsError> {
+        let mut inode = self.read_inode(ino)?;
+        self.free_inode_blocks(&inode)?;
+        for i in 0..15 {
+            wr32(&mut inode, IN_BLOCK + i * 4, 0);
+        }
+        wr32(&mut inode, IN_SIZE, 0);
+        wr32(&mut inode, IN_SIZE_HIGH, 0);
+        wr32(&mut inode, IN_BLOCKS, 0);
+        self.write_inode(ino, &inode)
+    }
 }
 
 #[cfg(test)]
@@ -1020,6 +1055,44 @@ mod tests {
         let mut buf = [0u8; 32];
         let n = fs.read(ino, &mut buf, 0).unwrap();
         assert_eq!(&buf[..n], b"Hello, Ext2!\n");
+    }
+
+    #[test]
+    fn truncate_preserves_inode_and_zeroes_data() {
+        let fs = fresh();
+        let ino = fs.create(EXT2_ROOT_INO, "t.txt").unwrap();
+        fs.write(ino, b"some contents here", 0).unwrap();
+        fs.truncate(ino).unwrap();
+
+        assert_eq!(fs.read_inode(ino).map(|n| rd32(&n, IN_SIZE)), Ok(0));
+        let mut buf = [0xFFu8; 8];
+        let n = fs.read(ino, &mut buf, 0).unwrap();
+        assert_eq!(n, 0);
+
+        // The directory entry must still resolve to the same inode.
+        let arc: Arc<dyn FileSystem + Send + Sync> = fs.clone();
+        let vnode = fs.lookup(EXT2_ROOT_INO, "t.txt", arc).unwrap();
+        assert_eq!(vnode.inode, ino);
+        assert_eq!(vnode.size, 0);
+
+        // Writes after truncate work and do not resurrect old data.
+        fs.write(ino, b"new", 0).unwrap();
+        let mut buf2 = [0u8; 8];
+        let n2 = fs.read(ino, &mut buf2, 0).unwrap();
+        assert_eq!(&buf2[..n2], b"new");
+    }
+
+    #[test]
+    fn truncate_frees_indirect_blocks() {
+        let fs = fresh();
+        let ino = fs.create(EXT2_ROOT_INO, "big.bin").unwrap();
+        let data = vec![0xABu8; 12 * 4096 + 4096]; // forces one single-indirect block
+        fs.write(ino, &data, 0).unwrap();
+        let before = fs.read_super().map(|s| rd32(&s, SB_FREE_BLOCKS)).unwrap();
+        fs.truncate(ino).unwrap();
+        let after = fs.read_super().map(|s| rd32(&s, SB_FREE_BLOCKS)).unwrap();
+        assert!(after > before, "free blocks should increase: {before} -> {after}");
+        assert_eq!(fs.read_inode(ino).map(|n| rd32(&n, IN_BLOCKS)), Ok(0));
     }
 
     #[test]

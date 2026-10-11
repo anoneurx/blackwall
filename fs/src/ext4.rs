@@ -286,6 +286,9 @@ impl FileSystem for Ext4Fs {
     fn unlink(&self, _p: u64, _n: &str) -> Result<(), VfsError> {
         Err(VfsError::NotSupported)
     }
+    fn truncate(&self, _i: u64) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported)
+    }
     fn get_root_inode(&self) -> u64 {
         2
     }

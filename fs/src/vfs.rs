@@ -78,6 +78,9 @@ pub trait FileSystem {
     /// Unlink (delete) a file by name from `parent_inode`.
     fn unlink(&self, parent_inode: u64, name: &str) -> Result<(), VfsError>;
 
+    /// Truncate `inode` to zero length, preserving the inode and its metadata.
+    fn truncate(&self, inode: u64) -> Result<(), VfsError>;
+
     /// Return the inode number for the root of this filesystem.
     fn get_root_inode(&self) -> u64;
 }
@@ -227,6 +230,12 @@ impl VfsManager {
             return Err(VfsError::NotADirectory);
         }
         parent.fs.unlink(parent.inode, &name)
+    }
+
+    /// Truncate the file at `path` to zero length, preserving the inode.
+    pub fn truncate(&self, path: &str) -> Result<(), VfsError> {
+        let node = self.resolve_path(path)?;
+        node.fs.truncate(node.inode)
     }
 
     /// Remove a directory at `path` (must be empty). Mimics POSIX `rmdir`.
