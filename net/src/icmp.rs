@@ -91,19 +91,68 @@ pub fn build_echo_reply(
     src_ip: IpAddress,
     dest_ip: IpAddress,
 ) -> Vec<u8> {
-    let mut icmp_buf: Vec<u8> = Vec::with_capacity(8 + request.payload.len());
-    let reply = IcmpMessage {
-        icmp_type: IcmpType::EchoReply,
+    build_echo(
+        IcmpType::EchoReply,
+        src_mac,
+        dest_mac,
+        src_ip,
+        dest_ip,
+        request.identifier,
+        request.sequence,
+        request.payload,
+    )
+}
+
+/// Build an outbound ICMP Echo Request (the *ping* side).
+pub fn build_echo_request(
+    src_mac: &[u8; 6],
+    dest_mac: &[u8; 6],
+    src_ip: IpAddress,
+    dest_ip: IpAddress,
+    identifier: u16,
+    sequence: u16,
+) -> Vec<u8> {
+    build_echo(
+        IcmpType::EchoRequest,
+        src_mac,
+        dest_mac,
+        src_ip,
+        dest_ip,
+        identifier,
+        sequence,
+        &[],
+    )
+}
+
+/// Shared Ethernet+IPv4+ICMP framing for outgoing echo traffic.
+fn build_echo(
+    icmp_type: IcmpType,
+    src_mac: &[u8; 6],
+    dest_mac: &[u8; 6],
+    src_ip: IpAddress,
+    dest_ip: IpAddress,
+    identifier: u16,
+    sequence: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    let icmp = IcmpMessage {
+        icmp_type,
         code: 0,
         checksum: 0,
-        identifier: request.identifier,
-        sequence: request.sequence,
-        payload: request.payload,
+        identifier,
+        sequence,
+        payload,
     };
-    reply.serialize(&mut icmp_buf);
+    let mut icmp_buf: Vec<u8> = Vec::with_capacity(8 + payload.len());
+    icmp.serialize(&mut icmp_buf);
 
-    // Wrap in IPv4
+    // Wrap in IPv4.
     let ip_payload = icmp_buf;
+    let mut frame_buf: Vec<u8> = Vec::with_capacity(14 + 20 + ip_payload.len());
+    // Ethernet header.
+    frame_buf.extend_from_slice(dest_mac);
+    frame_buf.extend_from_slice(src_mac);
+    frame_buf.extend_from_slice(&[0x08, 0x00]); // IPv4
     let ip_pkt = crate::ipv4::Ipv4Packet {
         version: 4,
         ihl: 5,
@@ -117,11 +166,6 @@ pub fn build_echo_reply(
         dest_ip,
         payload: &ip_payload,
     };
-    let mut frame_buf: Vec<u8> = Vec::with_capacity(14 + 20 + ip_payload.len());
-    // Ethernet header
-    frame_buf.extend_from_slice(dest_mac);
-    frame_buf.extend_from_slice(src_mac);
-    frame_buf.extend_from_slice(&[0x08, 0x00]); // IPv4
     ip_pkt.serialize(&mut frame_buf);
     frame_buf
 }
@@ -213,5 +257,35 @@ mod tests {
         msg.serialize(&mut buf);
         let cksum = ((buf[2] as u16) << 8) | buf[3] as u16;
         assert_ne!(cksum, 0);
+    }
+
+    #[test]
+    fn build_echo_request_frames_icmp() {
+        let frame = build_echo_request(
+            &[0x52, 0x54, 0x00, 0x12, 0x34, 0x56],
+            &[0x52, 0x54, 0x00, 0x12, 0x34, 0x02],
+            IpAddress([10, 0, 2, 15]),
+            IpAddress([10, 0, 2, 2]),
+            0x1234,
+            1,
+        );
+        assert_eq!(frame.len(), 14 + 20 + 8);
+        // Ethernet: IPv4 ethertype, dest/src MACs.
+        assert_eq!(&frame[0..6], &[0x52, 0x54, 0x00, 0x12, 0x34, 0x02]);
+        assert_eq!(&frame[6..12], &[0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
+        assert_eq!(frame[12], 0x08);
+        assert_eq!(frame[13], 0x00);
+        // ICMP starts at offset 14+20; type = 8 (EchoRequest), id/seq back.
+        let icmp = &frame[14 + 20..];
+        assert_eq!(icmp[0], 8);
+        assert_eq!(icmp[4], 0x12);
+        assert_eq!(icmp[5], 0x34);
+        assert_eq!(icmp[6], 0x00);
+        assert_eq!(icmp[7], 0x01);
+        // IPv4 header: version/IHL, protocol=1 (ICMP), src/dest IP.
+        assert_eq!(frame[14], 0x45);
+        assert_eq!(frame[14 + 9], 1);
+        assert_eq!(&frame[14 + 12..14 + 16], &[10, 0, 2, 15]);
+        assert_eq!(&frame[14 + 16..14 + 20], &[10, 0, 2, 2]);
     }
 }

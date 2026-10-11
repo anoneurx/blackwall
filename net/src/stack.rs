@@ -1,10 +1,10 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use crate::arp::{ArpOperation, ArpPacket, ArpTable};
+use crate::arp::{build_arp_request, ArpOperation, ArpPacket, ArpTable};
 use crate::ethernet::{ethertype, EthernetFrame, MacAddress};
 use crate::firewall::{Firewall, FirewallAction};
-use crate::icmp::{build_echo_reply, IcmpMessage, IcmpType};
+use crate::icmp::{build_echo_reply, build_echo_request, IcmpMessage, IcmpType};
 use crate::ipv4::{IpAddress, Ipv4Packet};
 use crate::tcp::{process_tcp_state, SocketState, TcpSegment, TcpSocket};
 use crate::udp::{UdpHeader, UdpSocketPool};
@@ -24,6 +24,13 @@ pub struct NetworkStack {
     udp_pool: UdpSocketPool,
     firewall: Firewall,
 
+    /// Identifier+sequence of the most recent outbound ping still awaiting a
+    /// reply.  `None` = no outstanding echo request.
+    pending_ping: Option<(u16, u16)>,
+
+    /// Set when an inbound Echo Reply matches the outstanding ping.
+    echo_reply_received: bool,
+
     transmit: TransmitFn,
 }
 
@@ -41,6 +48,8 @@ impl NetworkStack {
             tcp_sockets: Vec::new(),
             udp_pool: UdpSocketPool::new(),
             firewall,
+            pending_ping: None,
+            echo_reply_received: false,
             transmit,
         }
     }
@@ -60,6 +69,77 @@ impl NetworkStack {
     /// Bind a UDP port and return `true` on success.
     pub fn udp_bind(&mut self, port: u16) -> bool {
         self.udp_pool.bind(port)
+    }
+
+    // ── Outbound (active) API ────────────────────────────────────────────────
+
+    /// Resolve `ip` from the ARP cache, if already learned.
+    pub fn arp_lookup(&self, ip: IpAddress) -> Option<MacAddress> {
+        self.arp_table.lookup(ip)
+    }
+
+    /// Broadcast an ARP *who-has* request for `target_ip`.
+    pub fn send_arp_request(&self, target_ip: IpAddress) -> usize {
+        let frame = build_arp_request(&self.mac.0, self.ip, target_ip);
+        let len = frame.len();
+        (self.transmit)(&frame);
+        len
+    }
+
+    /// Send an ICMP Echo Request to `target_ip`.
+    ///
+    /// The destination MAC is taken from the ARP cache (the caller is expected
+    /// to have issued an ARP request first).  Returns `Some(frame_len)` once
+    /// the frame is handed to the NIC, or `None` if the neighbour is unknown.
+    pub fn send_echo_request(&mut self, target_ip: IpAddress, identifier: u16, sequence: u16) -> Option<usize> {
+        let dest_mac = self.arp_table.lookup(target_ip)?;
+        let frame = build_echo_request(
+            &self.mac.0,
+            &dest_mac.0,
+            self.ip,
+            target_ip,
+            identifier,
+            sequence,
+        );
+        self.pending_ping = Some((identifier, sequence));
+        self.echo_reply_received = false;
+        let len = frame.len();
+        (self.transmit)(&frame);
+        Some(len)
+    }
+
+    /// Send an ICMP Echo Request straight to a MAC (bypassing the ARP cache).
+    /// Used when the destination is not yet resolvable.
+    pub fn send_echo_request_to_mac(
+        &mut self,
+        dest_mac: MacAddress,
+        target_ip: IpAddress,
+        identifier: u16,
+        sequence: u16,
+    ) -> usize {
+        let frame = build_echo_request(
+            &self.mac.0,
+            &dest_mac.0,
+            self.ip,
+            target_ip,
+            identifier,
+            sequence,
+        );
+        self.pending_ping = Some((identifier, sequence));
+        self.echo_reply_received = false;
+        let len = frame.len();
+        (self.transmit)(&frame);
+        len
+    }
+
+    /// True once an Echo Reply matching the outstanding ping has arrived.
+    pub fn echo_reply_received(&self) -> bool {
+        self.echo_reply_received
+    }
+
+    /// Number of neighbours currently in the ARP cache.
+    pub fn arp_entries(&self) -> usize {
+        self.arp_table.len()
     }
 
     /// Process a single raw Ethernet frame received from the NIC.
@@ -155,14 +235,22 @@ impl NetworkStack {
         }
     }
 
-    fn handle_icmp(&self, ip: &Ipv4Packet, eth: &EthernetFrame) {
+    fn handle_icmp(&mut self, ip: &Ipv4Packet, eth: &EthernetFrame) {
         let msg = match IcmpMessage::parse(ip.payload) {
             Some(m) => m,
             None => return,
         };
-        if msg.icmp_type == IcmpType::EchoRequest {
-            let frame = build_echo_reply(&msg, &self.mac.0, &eth.src.0, self.ip, ip.src_ip);
-            (self.transmit)(&frame);
+        match msg.icmp_type {
+            IcmpType::EchoRequest => {
+                let frame = build_echo_reply(&msg, &self.mac.0, &eth.src.0, self.ip, ip.src_ip);
+                (self.transmit)(&frame);
+            }
+            IcmpType::EchoReply => {
+                if matches!(self.pending_ping, Some((id, _)) if id == msg.identifier) {
+                    self.echo_reply_received = true;
+                }
+            }
+            _ => {}
         }
     }
 

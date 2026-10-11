@@ -123,6 +123,23 @@ impl VirtioNet {
                     0x00, 0x01, 0x00, 0x01, // ID, Sequence
                     0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00, // Payload
                 ]);
+            } else if TICK == 400 {
+                // Echo Reply to our own outbound ping (identifier 0xB1A4),
+                // completing the outbound -> inbound round trip for `net ping`.
+                serial::line("[VIRTIO-NET] Simulating incoming ICMP Echo Reply (to our ping)...");
+                return Some(vec![
+                    0x52, 0x54, 0x00, 0x12, 0x34, 0x56, // dest: our MAC
+                    0x52, 0x54, 0x00, 0x12, 0x34, 0x02, // src: gateway MAC
+                    0x08, 0x00, // IPv4
+                    0x45, 0x00, 0x00, 0x1C, 0x12, 0x34, 0x00, 0x00, 0x40, 0x01, 0x00,
+                    0x00, // Protocol = 1 (ICMP)
+                    10, 0, 2, 2, // src IP (gateway)
+                    10, 0, 2, 15, // dest IP (us)
+                    // ICMP Echo Reply
+                    0x00, 0x00, 0x00, 0x00, // Type = 0 (Echo Reply), Code = 0
+                    0xB1, 0xA4, 0x00, 0x01, // ID = 0xB1A4, Sequence = 1
+                    0xDE, 0xAD, 0xBE, 0xEF, // Payload
+                ]);
             }
         }
         None

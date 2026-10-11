@@ -116,6 +116,10 @@ pub mod syscall {
     pub const SYS_UNLINK: u64 = 87;
     pub const SYS_GETPPID: u64 = 110;
 
+    // Blackwall-specific extension syscalls (outside the Linux range).
+    /// Network control/query: `r0` selects the operation (see `net` module).
+    pub const SYS_NET: u64 = 300;
+
     // open(2) flags — Linux-compatible bit values.
     pub const O_RDONLY: u64 = 0;
     pub const O_WRONLY: u64 = 1;
@@ -142,4 +146,17 @@ pub mod syscall {
     pub const EEXIST: i64 = -17;
     pub const ENOTDIR: i64 = -20;
     pub const ENOTSUP: i64 = -95;
+    pub const EAGAIN: i64 = -11;
+
+    // SYS_NET operations — passed in `r0`.
+    pub const NET_OP_STATE: u64 = 0;
+    pub const NET_OP_ARP: u64 = 1;
+    pub const NET_OP_PING: u64 = 2;
+
+    // SYS_NET result bitflags (returned in `rax`).
+    pub const NET_ST_NIC: u64 = 1 << 0;
+    pub const NET_ST_ARP_GATEWAY: u64 = 1 << 1;
+    pub const NET_ST_ECHO_REPLY: u64 = 1 << 2;
+    pub const NET_ST_TX_OK: u64 = 1 << 3;
+    pub const NET_ST_ARP_ENTRIES_SHIFT: u64 = 8;
 }

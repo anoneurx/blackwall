@@ -189,6 +189,22 @@ fn word_end(s: &[u8]) -> usize {
     i
 }
 
+/// Print an unsigned integer in decimal (minimal, allocation-free).
+fn write_u64(mut n: u64) {
+    if n == 0 {
+        write_str("0");
+        return;
+    }
+    let mut buf = [0u8; 20];
+    let mut i = buf.len();
+    while n > 0 {
+        i -= 1;
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+    }
+    write_str(core::str::from_utf8(&buf[i..]).unwrap_or(""));
+}
+
 fn path_of(cmd: &[u8], after: usize) -> &str {
     let mut start = after;
     while start < cmd.len() && (cmd[start] == b' ' || cmd[start] == b'\t') {
@@ -355,6 +371,46 @@ fn builtin_echo(cmd: &[u8]) {
     }
 }
 
+// ── Network status command ───────────────────────────────────────────────────
+
+/// `net [arp|ping]` — query or exercise the in-kernel network stack.
+fn builtin_net(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let arg = path_of(cmd, we);
+    let (op, name) = if strcmp(arg.as_bytes(), "arp") {
+        (NET_OP_ARP, "arp")
+    } else if strcmp(arg.as_bytes(), "ping") {
+        (NET_OP_PING, "ping")
+    } else {
+        (NET_OP_STATE, "state")
+    };
+
+    let status = syscall1(SYS_NET, op);
+
+    write_str("net ");
+    write_str(name);
+    write_str(": status=");
+    write_u64(status);
+    write_str(" [");
+    if status & NET_ST_NIC != 0 {
+        write_str("nic ");
+    } else {
+        write_str("no-nic ");
+    }
+    if status & NET_ST_TX_OK != 0 {
+        write_str("tx ");
+    }
+    if status & NET_ST_ARP_GATEWAY != 0 {
+        write_str("gw-arp ");
+    }
+    if status & NET_ST_ECHO_REPLY != 0 {
+        write_str("pong ");
+    }
+    write_str("arp_entries=");
+    write_u64((status >> NET_ST_ARP_ENTRIES_SHIFT) & 0xff);
+    write_str("]\n");
+}
+
 // ── Main loop ────────────────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -390,7 +446,7 @@ pub extern "C" fn _start() -> ! {
             write_str("  echo [text]      Print text (supports > and >> redirect)\n");
             write_str("  pwd              Print working directory\n");
             write_str("  clear            Clear the terminal screen\n");
-            write_str("  exit             Terminate userspace shell\n");
+            write_str("  net [arp|ping|state] — query or exercise the in-kernel network stack\n");
         } else if strcmp(word, "ls") {
             builtin_ls(cmd);
         } else if strcmp(word, "cat") {
@@ -409,6 +465,8 @@ pub extern "C" fn _start() -> ! {
             write_str("/\n");
         } else if strcmp(word, "clear") {
             write_str("\x1B[2J\x1B[H");
+        } else if strcmp(word, "net") {
+            builtin_net(cmd);
         } else if strcmp(word, "exit") {
             write_str("Exiting shell...\n");
             unsafe {

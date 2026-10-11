@@ -1,4 +1,4 @@
-use crate::ethernet::MacAddress;
+use crate::ethernet::{ethertype, EthernetFrame, MacAddress};
 use crate::ipv4::IpAddress;
 use alloc::vec::Vec;
 
@@ -82,6 +82,40 @@ impl ArpPacket {
     }
 }
 
+/// Build a complete Ethernet+ARP *who-has* request for `target_ip`.
+///
+/// The frame is sent to the broadcast address so a neighbour on the same
+/// segment answers with its MAC.  Returns the raw bytes ready for the NIC.
+pub fn build_arp_request(
+    src_mac: &[u8; 6],
+    src_ip: IpAddress,
+    target_ip: IpAddress,
+) -> Vec<u8> {
+    let pkt = ArpPacket {
+        hw_type: 1,          // Ethernet
+        proto_type: 0x0800,  // IPv4
+        hw_size: 6,
+        proto_size: 4,
+        operation: ArpOperation::Request,
+        sender_mac: MacAddress(*src_mac),
+        sender_ip: src_ip,
+        target_mac: MacAddress::ZERO,
+        target_ip,
+    };
+    let mut payload: Vec<u8> = Vec::with_capacity(28);
+    pkt.serialize(&mut payload);
+
+    let frame = EthernetFrame {
+        dest: MacAddress::BROADCAST,
+        src: MacAddress(*src_mac),
+        ethertype: ethertype::ARP,
+        payload: &payload,
+    };
+    let mut buf: Vec<u8> = Vec::with_capacity(14 + 28);
+    frame.serialize(&mut buf);
+    buf
+}
+
 pub struct ArpEntry {
     pub ip: IpAddress,
     pub mac: MacAddress,
@@ -106,6 +140,16 @@ impl ArpTable {
 
     pub fn lookup(&self, ip: IpAddress) -> Option<MacAddress> {
         self.entries.iter().find(|e| e.ip == ip).map(|e| e.mac)
+    }
+
+    /// Number of cached neighbours.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the cache holds no entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 
@@ -200,5 +244,28 @@ mod tests {
         data[7] = 99; // Unknown
         let pkt = ArpPacket::parse(&data).unwrap();
         assert_eq!(pkt.operation, ArpOperation::Unknown);
+    }
+
+    #[test]
+    fn build_arp_request_roundtrip() {
+        let mut frame = build_arp_request(
+            &[0x52, 0x54, 0x00, 0x12, 0x34, 0x56],
+            test_ip(10, 0, 2, 15),
+            test_ip(10, 0, 2, 2),
+        );
+        assert_eq!(frame.len(), 14 + 28);
+        // Broadcast destination.
+        assert_eq!(&frame[0..6], &[0xff; 6]);
+        // EtherType ARP.
+        assert_eq!(frame[12], 0x08);
+        assert_eq!(frame[13], 0x06);
+        let eth = crate::ethernet::EthernetFrame::parse(&frame).unwrap();
+        assert_eq!(eth.ethertype, ethertype::ARP);
+        let pkt = ArpPacket::parse(eth.payload).unwrap();
+        assert_eq!(pkt.operation, ArpOperation::Request);
+        assert_eq!(pkt.sender_ip, test_ip(10, 0, 2, 15));
+        assert_eq!(pkt.target_ip, test_ip(10, 0, 2, 2));
+        assert_eq!(pkt.target_mac, MacAddress::ZERO);
+        let _ = &mut frame;
     }
 }
