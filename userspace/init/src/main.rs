@@ -459,7 +459,10 @@ pub extern "C" fn _start() -> ! {
             builtin_rm(cmd);
         } else if strcmp(word, "touch") {
             builtin_touch(cmd);
-        } else if strcmp(word, "echo") {
+        } else if strcmp(word, "run") {
+            // run <path> - not yet implemented
+            write_str("run: not yet implemented\n");
+        } else if strcmp(word, "pwd") {
             builtin_echo(cmd);
         } else if strcmp(word, "pwd") {
             write_str("/\n");

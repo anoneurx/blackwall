@@ -200,7 +200,7 @@ menuentry "Black Wall Core v0.1 (Recovery)" {
     }
 
     let (iso_path, _temp_fat, _iso_file, _fat_size) =
-        build_iso(&cfg.output_iso, &iso_image, false).context("Failed to create ISO image")?;
+        build_iso(&cfg.output_iso, &iso_image, true).context("Failed to create ISO image")?;
 
     let meta = fs::metadata(&iso_path)?;
     ok(&format!(

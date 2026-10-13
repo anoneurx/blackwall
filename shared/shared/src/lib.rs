@@ -111,6 +111,7 @@ pub mod syscall {
     pub const SYS_EXECVE: u64 = 59;
     pub const SYS_EXIT: u64 = 60;
     pub const SYS_READDIR: u64 = 78;
+    pub const SYS_WAITPID: u64 = 61;
     pub const SYS_MKDIR: u64 = 83;
     pub const SYS_RMDIR: u64 = 84;
     pub const SYS_UNLINK: u64 = 87;

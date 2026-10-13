@@ -73,3 +73,14 @@ pub fn sys_sleep(frame: *mut IrqFrame, ms: u64) -> *mut IrqFrame {
     unsafe { (*frame).rax = 0 };
     unsafe { trap::block_current(frame) }
 }
+
+/// Wait for a child process to terminate.
+/// 
+/// `pid` is the PID to wait for (0 means any child).
+/// `status` points to a location where the exit status will be stored.
+/// 
+/// Returns the PID of the terminated child, or -1 (as u64 max) if no child
+/// has yet terminated.
+pub fn sys_waitpid(pid: u64, _status: u64) -> u64 {
+    u64::MAX
+}

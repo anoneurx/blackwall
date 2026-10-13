@@ -64,7 +64,7 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
         SYS_GETPPID => process::sys_getppid(),
         SYS_YIELD => return trap::reschedule_current(frame, false),
         SYS_SLEEP => return process::sys_sleep(frame, a0),
-
+        SYS_WAITPID => process::sys_waitpid(a0, a1),
         SYS_NET => crate::net::handle_syscall(a0),
 
         _ => ENOSYS as u64,
