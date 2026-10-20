@@ -66,6 +66,8 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
         SYS_SLEEP => return process::sys_sleep(frame, a0),
         SYS_WAITPID => return process::sys_waitpid(frame, a0, a1),
         SYS_NET => crate::net::handle_syscall(a0),
+        SYS_MMAP => ENOSYS as u64,
+        SYS_MUNMAP => ENOSYS as u64,
 
         _ => ENOSYS as u64,
     };
@@ -73,3 +75,6 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
     f.rax = result;
     core::ptr::null_mut()
 }
+
+// mmap/munmap stubs (Phase 2.1)
+use blackwall_shared::syscall::{SYS_MMAP, SYS_MUNMAP};

@@ -116,6 +116,8 @@ pub mod syscall {
     pub const SYS_RMDIR: u64 = 84;
     pub const SYS_UNLINK: u64 = 87;
     pub const SYS_GETPPID: u64 = 110;
+    pub const SYS_MMAP: u64 = 9;
+    pub const SYS_MUNMAP: u64 = 11;
 
     // Blackwall-specific extension syscalls (outside the Linux range).
     /// Network control/query: `r0` selects the operation (see `net` module).
