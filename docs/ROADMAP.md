@@ -40,3 +40,6 @@ Status: ACTIVE (Phase 0 complete). Living document. Updated for every change per
 - Panic: backtrace, serial dump, defined policy; no silent infinite loop
 - In-kernel unit/integration + host tests; kernel test harness
 - Acceptance: useful traces; harness runs in CI
+
+### Phase 2 Progress
+- 2.1: Added PAGE_COW flag; COW fork/mmap/guard pages in progress
