@@ -24,6 +24,7 @@ fn write_str(s: &str) {
 
 fn read_line(buf: &mut [u8]) -> usize {
     let mut len = 0;
+    let mut first = true;
     loop {
         let mut b = [0u8; 1];
         let bytes_read = unsafe {
@@ -45,7 +46,11 @@ fn read_line(buf: &mut [u8]) -> usize {
             continue;
         }
         let ch = b[0];
-        if ch == b'\n' {
+        if first && (ch == b'\r' || ch == b'\n') {
+            continue;
+        }
+        first = false;
+        if ch == b'\n' || ch == b'\r' {
             break;
         }
         if ch == 0x08 || ch == 0x7f {
