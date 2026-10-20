@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt-clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Add targets
+        run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy (host)
+        run: cargo clippy --workspace -- -D warnings
+      - name: clippy (kernel/uefi)
+        run: cargo clippy -p blackwall-kernel --target x86_64-unknown-uefi -- -D warnings || true
+      - name: clippy (bootloader)
+        run: cargo clippy -p blackwall-bootloader --target x86_64-unknown-uefi -- -D warnings || true
+
+  build-test:
+    runs-on: ubuntu-latest
+    needs: fmt-clippy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add targets
+        run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build host workspace
+        run: cargo build --workspace
+      - name: Build init (bare metal)
+        run: cd userspace/init && cargo build --target x86_64-unknown-none
+      - name: Build kernel/bootloader
+        run: cargo build -p blackwall-kernel --target x86_64-unknown-uefi && cargo build -p blackwall-bootloader --target x86_64-unknown-uefi
+      - name: Host tests
+        run: cargo test --workspace
+
+  audit-deny:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked || true
+      - name: cargo audit
+        run: cargo audit || true
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked || true
+      - name: cargo deny
+        run: cargo deny check || true
+
+  qemu-boot:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add targets
+        run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Install QEMU/OVMF
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 ovmf
+      - name: Build everything
+        run: |
+          cd userspace/init && cargo build --target x86_64-unknown-none && cd ../..
+          cargo build -p blackwall-kernel --target x86_64-unknown-uefi
+          cargo build -p blackwall-bootloader --target x86_64-unknown-uefi
+          cargo run -p bw-iso-builder -- --output dist/blackwall-server-v0.1.iso
+      - name: QEMU boot test (serial + isa-debug-exit)
+        run: |
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/vars.fd || cp /usr/share/OVMF/OVMF_VARS.fd /tmp/vars.fd
+          OVMF_CODE=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' | head -1)
+          timeout 60 qemu-system-x86_64 -machine q35 -m 256M -nographic \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/vars.fd \
+            -cdrom dist/blackwall-server-v0.1.iso \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 2>&1 | tee qemu-boot.log | grep -q "blackwall>" && echo "BOOT_OK" || (echo "BOOT_FAIL" && tail -40 qemu-boot.log && exit 1)
