@@ -12,7 +12,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 ISO=""
 HEADLESS=false
@@ -103,7 +103,10 @@ if [[ -n "${BIOS_PATH}" ]]; then
 fi
 
 if [[ "${HEADLESS}" == "true" ]]; then
-    QEMU_ARGS+=(-nographic)
+    # NOTE: never combine -nographic with -serial stdio — -nographic grabs
+    # stdio for the monitor and QEMU aborts with "cannot use stdio by multiple
+    # character devices".  -display none keeps stdio exclusively for serial.
+    QEMU_ARGS+=(-display none)
 else
     QEMU_ARGS+=(-display sdl)
 fi

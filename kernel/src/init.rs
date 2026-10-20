@@ -50,6 +50,10 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     // The page table the firmware left us in.  Kernel threads must switch
     // back to it whenever they leave a user task.
     let kernel_cr3 = trap::current_cr3();
+    memory::BOOT_CR3.store(
+        kernel_cr3 & !0xFFF_u64,
+        core::sync::atomic::Ordering::Relaxed,
+    );
 
     // ── Boot banner ──────────────────────────────────────────────────────────
     serial::line(messages::BOOT_BANNER);
@@ -152,6 +156,10 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
             &mut memory_state.physical,
         )
     };
+
+    // Publish the memory managers so syscalls (`fork`, `execve`) can allocate
+    // address spaces after boot.  Must happen before interrupts are enabled.
+    *memory::MEMORY.lock() = Some(memory_state);
 
     // ── Register init as a user task and enable scheduling ───────────────────
     let init_pid = {

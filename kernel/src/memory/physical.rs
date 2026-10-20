@@ -14,6 +14,11 @@ impl PhysFrame {
     pub fn address(self) -> u64 {
         self.number * PAGE_SIZE
     }
+
+    /// Build a frame handle for the physical page containing `address`.
+    pub fn containing(address: u64) -> Self {
+        Self { number: address / PAGE_SIZE }
+    }
 }
 
 pub struct PhysicalMemoryManager {

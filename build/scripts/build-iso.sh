@@ -20,7 +20,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST="${ROOT}/dist"
 BUILD_DIR="${ROOT}/_isobuild"
 PROFILE="debug"
@@ -76,13 +76,43 @@ echo "Root     : ${ROOT}"
 echo ""
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
+# The GRUB + xorriso path below needs both tools.  When they are missing we
+# fall back to the pure-Rust ISO builder (tools/iso-builder / bw-iso-builder),
+# which produces a UEFI-bootable hybrid ISO without any external tooling.
+USE_RUST_BUILDER=false
 for cmd in xorriso grub-mkrescue; do
     if ! command -v "${cmd}" &>/dev/null; then
-        echo "ERROR: '${cmd}' is required but not found."
-        echo "  Install with: sudo apt install ${cmd}"
-        exit 1
+        echo "NOTE: '${cmd}' not found — falling back to bw-iso-builder (pure Rust)."
+        USE_RUST_BUILDER=true
+        break
     fi
 done
+
+if [[ "${USE_RUST_BUILDER}" == "true" ]]; then
+    echo "[ 1/3 ] Building userspace init (x86_64-unknown-none)..."
+    cd "${ROOT}/userspace/init"
+    if [[ "${PROFILE}" == "release" ]]; then
+        cargo build --release --target x86_64-unknown-none 2>&1 | tail -3
+    else
+        cargo build --target x86_64-unknown-none 2>&1 | tail -3
+    fi
+
+    echo "[ 2/3 ] Building UEFI kernel + bootloader..."
+    cd "${ROOT}"
+    cargo build -p blackwall-bootloader --target x86_64-unknown-uefi 2>&1 | tail -3
+    cargo build -p blackwall-kernel --target x86_64-unknown-uefi 2>&1 | tail -3
+
+    echo "[ 3/3 ] Assembling ISO with bw-iso-builder..."
+    ISO_OUT="${DIST}/blackwall-server-${VERSION}.iso"
+    if [[ "${PROFILE}" == "release" ]]; then
+        cargo run -q -p bw-iso-builder -- --release --output "${ISO_OUT}"
+    else
+        cargo run -q -p bw-iso-builder -- --output "${ISO_OUT}"
+    fi
+    echo ""
+    echo "ISO written to: ${ISO_OUT}"
+    exit 0
+fi
 
 # ── Step 1: Build the workspace ──────────────────────────────────────────────
 echo "[ 1/7 ] Building workspace..."

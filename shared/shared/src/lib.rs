@@ -150,6 +150,8 @@ pub mod syscall {
     pub const EAGAIN: i64 = -11;
     pub const EFAULT: i64 = -14;
     pub const EINVAL: i64 = -22;
+    pub const ECHILD: i64 = -10;
+    pub const ESRCH: i64 = -3;
 
     // SYS_NET operations — passed in `r0`.
     pub const NET_OP_STATE: u64 = 0;

@@ -25,7 +25,7 @@ fn err_of(e: VfsError) -> u64 {
 ///
 /// The pointer is validated with [`crate::memory::user_access::access_ok`]
 /// before any dereference; the scan never exceeds 511 bytes.
-fn read_path(ptr: u64) -> Option<String> {
+pub(crate) fn read_path(ptr: u64) -> Option<String> {
     if ptr == 0 {
         return None;
     }

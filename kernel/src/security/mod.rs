@@ -100,8 +100,8 @@ impl SecurityContext {
     /// Every userspace syscall passes through this filter in the dispatcher;
     /// anything not enumerated here is a `Kill`.  The list mirrors the
     /// syscalls a plain user shell actually needs: stdio, filesystem access,
-    /// `lseek`/`stat`, timing, process identity and exit.  Dangerous entries
-    /// (`open`-style wide FS handles, `fork`/`execve`) stay denied.
+    /// `lseek`/`stat`, timing, process identity, exit, and the process
+    /// lifecycle calls (`fork`/`execve`/`waitpid`) needed by the `run` builtin.
     pub fn unprivileged() -> Self {
         let mut filter = SyscallFilter::new_deny_all();
         for nr in [
@@ -114,7 +114,10 @@ impl SecurityContext {
             24,   /* yield */
             35,   /* sleep */
             39,   /* getpid */
+            57,   /* fork */
+            59,   /* execve */
             60,   /* exit */
+            61,   /* waitpid */
             78,    /* readdir */
             83,    /* mkdir */
             84,    /* rmdir */

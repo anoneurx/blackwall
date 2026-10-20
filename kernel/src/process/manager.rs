@@ -134,7 +134,7 @@ impl ProcessManager {
         self.processes.iter_mut().find(|p| p.pid == pid)
     }
 
-    /// Release the stack memory for a terminated task.
+    /// Release the stack memory and address space of a terminated task.
     ///
     /// # Safety
     ///
@@ -150,6 +150,17 @@ impl ProcessManager {
                 pcb.stack_base = core::ptr::null_mut();
                 pcb.stack_size = 0;
             }
+            // Free the task's private address space (page tables + user
+            // pages).  `destroy_address_space` frees only frames marked
+            // PAGE_OWNED and refuses the permanent boot root; the
+            // `!= current` guard additionally protects the active CR3.
+            let cr3 = pcb.cr3 & !0xFFF_u64;
+            if cr3 != 0 && cr3 != crate::arch::x86_64::trap::current_cr3() & !0xFFF_u64 {
+                if let Some(mem) = crate::memory::MEMORY.lock().as_mut() {
+                    crate::process::loader::destroy_address_space(cr3, &mut mem.physical);
+                }
+                pcb.cr3 = 0;
+            }
         }
     }
 
@@ -162,6 +173,12 @@ impl ProcessManager {
             n => n + 1,
         };
         pid
+    }
+
+    /// Remove a PCB from the process table (after it has been reaped by its
+    /// parent via `waitpid`).  Its stacks must already have been freed.
+    pub fn remove(&mut self, pid: u16) {
+        self.processes.retain(|p| p.pid != pid);
     }
 
     /// Iterate over all PCBs (read-only).

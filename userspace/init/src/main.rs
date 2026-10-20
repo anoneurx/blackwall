@@ -48,6 +48,13 @@ fn read_line(buf: &mut [u8]) -> usize {
         if ch == b'\n' {
             break;
         }
+        if ch == 0x08 || ch == 0x7f {
+            if len > 0 {
+                len -= 1;
+                write_str("\x08 \x08");
+            }
+            continue;
+        }
         if len < buf.len() {
             buf[len] = ch;
             len += 1;
@@ -371,6 +378,40 @@ fn builtin_echo(cmd: &[u8]) {
     }
 }
 
+/// `run <path>` — fork, exec the ELF at `path` in the child, wait for it.
+fn builtin_run(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("run: usage: run <path>\n");
+        return;
+    }
+    let (pb, _) = path_buf(path);
+
+    let pid = syscall1(SYS_FORK, 0) as i64;
+    if pid == 0 {
+        // Child: replace this image with the requested program.
+        syscall3(SYS_EXECVE, pb.as_ptr() as u64, 0, 0);
+        // Only reached when execve failed.
+        write_str("run: execve failed\n");
+        syscall1(SYS_EXIT, 127);
+    } else if pid > 0 {
+        let mut status: u64 = 0;
+        let r = syscall3(SYS_WAITPID, pid as u64, &mut status as *mut u64 as u64, 0) as i64;
+        if r == pid {
+            write_str("run: pid ");
+            write_u64(pid as u64);
+            write_str(" exited with status ");
+            write_u64(status);
+            write_str("\n");
+        } else {
+            write_str("run: waitpid failed\n");
+        }
+    } else {
+        write_str("run: fork failed\n");
+    }
+}
+
 // ── Network status command ───────────────────────────────────────────────────
 
 /// `net [arp|ping]` — query or exercise the in-kernel network stack.
@@ -411,6 +452,55 @@ fn builtin_net(cmd: &[u8]) {
     write_str("]\n");
 }
 
+/// `anx` — minimal package manager (alias for `apt`-style operations).
+fn builtin_anx(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let rest = &cmd[we..];
+    // skip whitespace
+    let mut start = 0;
+    while start < rest.len() && (rest[start] == b' ' || rest[start] == b'\t') {
+        start += 1;
+    }
+    if start >= rest.len() {
+        write_str("anx: usage: anx <update|upgrade|install|remove|search|list>\n");
+        write_str("anx: (packages not implemented in this build)\n");
+        return;
+    }
+    let sub = &rest[start..];
+    let swe = word_end(sub);
+    let subword = &sub[..swe];
+    if strcmp(subword, "update") || strcmp(subword, "upgrade") {
+        write_str("anx: repository update/upgrade — nothing to do (offline)\n");
+        return;
+    }
+    if strcmp(subword, "list") || strcmp(subword, "search") {
+        write_str("anx: no packages available in local repository\n");
+        return;
+    }
+    if strcmp(subword, "install") || strcmp(subword, "remove") || strcmp(subword, "purge") {
+        let mut pstart = swe;
+        while pstart < sub.len() && (sub[pstart] == b' ' || sub[pstart] == b'\t') {
+            pstart += 1;
+        }
+        if pstart >= sub.len() {
+            write_str("anx: usage: anx install|remove <package>\n");
+            return;
+        }
+        let pkg = core::str::from_utf8(&sub[pstart..]).unwrap_or("").trim();
+        write_str("anx: ");
+        write_str(core::str::from_utf8(subword).unwrap_or(""));
+        write_str(" of '");
+        write_str(pkg);
+        write_str("' not supported (no package repo)\n");
+        return;
+    }
+    write_str("anx: unknown subcommand '");
+    if let Ok(s) = core::str::from_utf8(subword) {
+        write_str(s);
+    }
+    write_str("'\n");
+}
+
 // ── Main loop ────────────────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -445,8 +535,10 @@ pub extern "C" fn _start() -> ! {
             write_str("  touch <path>     Create an empty file\n");
             write_str("  echo [text]      Print text (supports > and >> redirect)\n");
             write_str("  pwd              Print working directory\n");
+            write_str("  run <path>       Execute an ELF program (fork + execve + wait)\n");
             write_str("  clear            Clear the terminal screen\n");
             write_str("  net [arp|ping|state] — query or exercise the in-kernel network stack\n");
+            write_str("  anx              Package manager (alias for apt-like operations)\n");
         } else if strcmp(word, "ls") {
             builtin_ls(cmd);
         } else if strcmp(word, "cat") {
@@ -459,17 +551,18 @@ pub extern "C" fn _start() -> ! {
             builtin_rm(cmd);
         } else if strcmp(word, "touch") {
             builtin_touch(cmd);
-        } else if strcmp(word, "run") {
-            // run <path> - not yet implemented
-            write_str("run: not yet implemented\n");
-        } else if strcmp(word, "pwd") {
+        } else if strcmp(word, "echo") {
             builtin_echo(cmd);
+        } else if strcmp(word, "run") {
+            builtin_run(cmd);
         } else if strcmp(word, "pwd") {
             write_str("/\n");
         } else if strcmp(word, "clear") {
             write_str("\x1B[2J\x1B[H");
         } else if strcmp(word, "net") {
             builtin_net(cmd);
+        } else if strcmp(word, "anx") {
+            builtin_anx(cmd);
         } else if strcmp(word, "exit") {
             write_str("Exiting shell...\n");
             unsafe {

@@ -46,6 +46,13 @@ pub struct ProcessControlBlock {
     pub parent: u16,
     /// Exit status recorded by `exit`/`wait`.
     pub exit_status: i64,
+    /// When `state == Blocked` on `waitpid`, the child PID being awaited
+    /// (0 = any child).
+    /// Wait target for a `waitpid`-blocked task (`0` = any child).
+    pub wait_child: u16,
+    /// User pointer that receives the exit status when a blocked `waitpid`
+    /// completes (`0` when none).
+    pub wait_status_ptr: u64,
 }
 
 // SAFETY: PCBs are only mutated while holding the global scheduler lock.
@@ -81,6 +88,8 @@ impl ProcessControlBlock {
             cr3: 0,
             parent: 0,
             exit_status: 0,
+            wait_child: 0,
+            wait_status_ptr: 0,
         }
     }
 

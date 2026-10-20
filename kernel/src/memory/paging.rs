@@ -12,6 +12,12 @@ pub const PAGE_ACCESSED: u64 = 1 << 5;
 pub const PAGE_DIRTY: u64 = 1 << 6;
 pub const PAGE_HUGE: u64 = 1 << 7;
 pub const PAGE_GLOBAL: u64 = 1 << 8;
+/// Software-only "this frame is owned by this address space" marker stored in
+/// an x86 AVL bit (bit 9), which the CPU ignores.  Set on every table/data
+/// frame a process allocates for itself and cleared on every frame it merely
+/// shares from the kernel (boot) root, so [`destroy_address_space`] frees only
+/// what the process uniquely owns.
+pub const PAGE_OWNED: u64 = 1 << 9;
 pub const PAGE_NO_EXECUTE: u64 = 1 << 63;
 
 pub fn align_down(address: u64) -> u64 {

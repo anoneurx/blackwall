@@ -58,13 +58,13 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
 
         SYS_EXIT => return process::sys_exit(frame, a0),
         SYS_FORK => process::sys_fork(frame),
-        SYS_EXECVE => process::sys_execve(a0, a1, a2),
+        SYS_EXECVE => process::sys_execve(frame, a0, a1, a2),
 
         SYS_GETPID => crate::scheduler::current_pid() as u64,
         SYS_GETPPID => process::sys_getppid(),
         SYS_YIELD => return trap::reschedule_current(frame, false),
         SYS_SLEEP => return process::sys_sleep(frame, a0),
-        SYS_WAITPID => process::sys_waitpid(a0, a1),
+        SYS_WAITPID => return process::sys_waitpid(frame, a0, a1),
         SYS_NET => crate::net::handle_syscall(a0),
 
         _ => ENOSYS as u64,

@@ -10,7 +10,7 @@
 
 use crate::arch::x86_64::trap::current_cr3;
 use crate::memory::paging::{
-    PageTable, PageTableEntry, PAGE_HUGE, PAGE_PRESENT, PAGE_USER_ACCESSIBLE, PAGE_WRITABLE,
+    PageTable, PageTableEntry, PAGE_HUGE, PAGE_USER_ACCESSIBLE, PAGE_WRITABLE,
     USER_SPACE_END,
 };
 

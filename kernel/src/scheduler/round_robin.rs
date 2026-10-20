@@ -1,4 +1,4 @@
-use crate::arch::x86_64::trap::{switch_cr3, IrqFrame};
+use crate::arch::x86_64::trap::{current_cr3, switch_cr3, IrqFrame};
 use crate::process::manager::ProcessManager;
 use crate::process::state::ProcessState;
 use crate::scheduler::queue::RunQueue;
@@ -287,24 +287,96 @@ impl RoundRobinScheduler {
             .map(|p| p.pid)
     }
 
-    /// Move any sleeping task past its deadline back to the run queue.
+    /// Move sleeping or child-waiting tasks that became runnable back to the
+    /// run queue.
+    ///
+    /// * `Sleeping` tasks wake once `sleep_until` has passed.
+    /// * `Blocked` tasks (parked in `waitpid`) wake once the child they are
+    ///   waiting for has exited.
     fn wake_sleeping(&mut self, current_ticks: u64) {
         let mut to_wake: [u16; 64] = [0; 64];
         let mut count = 0usize;
 
         for pcb in self.manager.iter() {
-            if pcb.state == ProcessState::Sleeping && current_ticks >= pcb.sleep_until {
-                if count < to_wake.len() {
-                    to_wake[count] = pcb.pid;
-                    count += 1;
-                }
+            let ready = match pcb.state {
+                ProcessState::Sleeping => current_ticks >= pcb.sleep_until,
+                ProcessState::Blocked => self.manager.iter().any(|c| {
+                    c.parent == pcb.pid
+                        && (pcb.wait_child == 0 || c.pid == pcb.wait_child)
+                        && matches!(c.state, ProcessState::Zombie | ProcessState::Terminated)
+                }),
+                _ => false,
+            };
+            if ready && count < to_wake.len() {
+                to_wake[count] = pcb.pid;
+                count += 1;
             }
         }
 
         for &pid in &to_wake[..count] {
+            // `sys_waitpid` blocks with state `Blocked`; when a child exits we
+            // must finish that syscall on the parent's behalf: reap the child,
+            // write its status through the saved user pointer, and leave the
+            // child PID in the parent's return register (`rax`).
+            let blocked_wait = self
+                .manager
+                .get(pid)
+                .filter(|p| p.state == ProcessState::Blocked)
+                .map(|p| (p.wait_child, p.wait_status_ptr, p.cr3));
+
+            if let Some((want, status_ptr, parent_cr3)) = blocked_wait {
+                let child = self
+                    .manager
+                    .iter()
+                    .find(|c| {
+                        c.parent == pid
+                            && (want == 0 || c.pid == want)
+                            && matches!(c.state, ProcessState::Zombie | ProcessState::Terminated)
+                    })
+                    .map(|c| (c.pid, c.exit_status, c.state));
+
+                if let Some((child_pid, status, child_state)) = child {
+                    if status_ptr != 0 && parent_cr3 != 0 {
+                        // The user pointer lives in the *parent's* address
+                        // space, which is not necessarily the active one while
+                        // the timer tick runs the scheduler.  Switch to it for
+                        // the duration of the write (kernel mappings are shared
+                        // by every address space, so the current stack stays
+                        // valid).
+                        let saved_cr3 = current_cr3();
+                        unsafe { switch_cr3(parent_cr3) };
+                        if crate::memory::user_access::access_ok(status_ptr, 8, true) {
+                            unsafe {
+                                core::ptr::write_unaligned(status_ptr as *mut u64, status as u64)
+                            };
+                        }
+                        unsafe { switch_cr3(saved_cr3) };
+                    }
+                    if child_state == ProcessState::Zombie {
+                        unsafe { self.manager.free_stack(child_pid) };
+                    }
+                    self.manager.remove(child_pid);
+
+                    if let Some(pcb) = self.manager.get_mut(pid) {
+                        pcb.state = ProcessState::Ready;
+                        pcb.wait_child = 0;
+                        pcb.wait_status_ptr = 0;
+                        if pcb.stack_ptr != 0 {
+                            unsafe { (*(pcb.stack_ptr as *mut IrqFrame)).rax = child_pid as u64 };
+                        }
+                    }
+                    if !self.queue.contains(pid) {
+                        self.queue.enqueue(pid);
+                    }
+                    continue;
+                }
+            }
+
             if let Some(pcb) = self.manager.get_mut(pid) {
                 pcb.state = ProcessState::Ready;
                 pcb.sleep_until = 0;
+                pcb.wait_child = 0;
+                pcb.wait_status_ptr = 0;
             }
             if !self.queue.contains(pid) {
                 self.queue.enqueue(pid);
