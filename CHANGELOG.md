@@ -150,3 +150,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased] — Phase 4 Progress
 ### Added
 - Tracing: basic counters (syscalls/context switches)
+
+## [Unreleased] — Phase 5/6 Progress
+### Added
+- Phase 5: groundwork for POSIX libc, bwsh enhancements, anx hardening
+- Phase 6: issue/PR templates, CODE_OF_CONDUCT, syscall reference, ARM64 port plan
