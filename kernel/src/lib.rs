@@ -41,3 +41,4 @@ pub use init::start as kernel_main;
 
 #[cfg(test)]
 pub mod tests;
+pub mod tracing;

@@ -19,3 +19,4 @@ fn main() {
 
 #[cfg(test)]
 mod tests;
+pub mod tracing;
