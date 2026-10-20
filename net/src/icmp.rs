@@ -112,16 +112,7 @@ pub fn build_echo_request(
     identifier: u16,
     sequence: u16,
 ) -> Vec<u8> {
-    build_echo(
-        IcmpType::EchoRequest,
-        src_mac,
-        dest_mac,
-        src_ip,
-        dest_ip,
-        identifier,
-        sequence,
-        &[],
-    )
+    build_echo(IcmpType::EchoRequest, src_mac, dest_mac, src_ip, dest_ip, identifier, sequence, &[])
 }
 
 /// Shared Ethernet+IPv4+ICMP framing for outgoing echo traffic.
@@ -135,14 +126,7 @@ fn build_echo(
     sequence: u16,
     payload: &[u8],
 ) -> Vec<u8> {
-    let icmp = IcmpMessage {
-        icmp_type,
-        code: 0,
-        checksum: 0,
-        identifier,
-        sequence,
-        payload,
-    };
+    let icmp = IcmpMessage { icmp_type, code: 0, checksum: 0, identifier, sequence, payload };
     let mut icmp_buf: Vec<u8> = Vec::with_capacity(8 + payload.len());
     icmp.serialize(&mut icmp_buf);
 

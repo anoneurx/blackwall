@@ -86,14 +86,10 @@ impl ArpPacket {
 ///
 /// The frame is sent to the broadcast address so a neighbour on the same
 /// segment answers with its MAC.  Returns the raw bytes ready for the NIC.
-pub fn build_arp_request(
-    src_mac: &[u8; 6],
-    src_ip: IpAddress,
-    target_ip: IpAddress,
-) -> Vec<u8> {
+pub fn build_arp_request(src_mac: &[u8; 6], src_ip: IpAddress, target_ip: IpAddress) -> Vec<u8> {
     let pkt = ArpPacket {
-        hw_type: 1,          // Ethernet
-        proto_type: 0x0800,  // IPv4
+        hw_type: 1,         // Ethernet
+        proto_type: 0x0800, // IPv4
         hw_size: 6,
         proto_size: 4,
         operation: ArpOperation::Request,

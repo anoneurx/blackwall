@@ -101,12 +101,7 @@ pub unsafe fn init_kernel_frame(stack_top: u64, entry: fn()) -> u64 {
 /// # Safety
 /// `kernel_stack_top` must point one past a live, writable kernel stack and
 /// the target ring-3 address space must already be mapped in `cr3`.
-pub unsafe fn init_user_frame(
-    kernel_stack_top: u64,
-    entry: u64,
-    user_rsp: u64,
-    arg: u64,
-) -> u64 {
+pub unsafe fn init_user_frame(kernel_stack_top: u64, entry: u64, user_rsp: u64, arg: u64) -> u64 {
     let frame_ptr = kernel_stack_top - core::mem::size_of::<IrqFrame>() as u64;
     let frame = &mut *(frame_ptr as *mut IrqFrame);
 

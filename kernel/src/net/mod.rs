@@ -104,8 +104,14 @@ pub fn handle_syscall(op: u64) -> u64 {
         NET_OP_STATE => {
             serial::line(&alloc::format!(
                 "[NET] state: ip={}.{}.{}.{} gw={}.{}.{}.{} arp_entries={}",
-                stack.ip.0[0], stack.ip.0[1], stack.ip.0[2], stack.ip.0[3],
-                stack.gateway.0[0], stack.gateway.0[1], stack.gateway.0[2], stack.gateway.0[3],
+                stack.ip.0[0],
+                stack.ip.0[1],
+                stack.ip.0[2],
+                stack.ip.0[3],
+                stack.gateway.0[0],
+                stack.gateway.0[1],
+                stack.gateway.0[2],
+                stack.gateway.0[3],
                 stack.arp_entries(),
             ));
         }
@@ -115,7 +121,11 @@ pub fn handle_syscall(op: u64) -> u64 {
             status |= NET_ST_TX_OK;
             serial::line(&alloc::format!(
                 "[NET] ARP who-has {}.{}.{}.{} — TX {} bytes",
-                gw.0[0], gw.0[1], gw.0[2], gw.0[3], len,
+                gw.0[0],
+                gw.0[1],
+                gw.0[2],
+                gw.0[3],
+                len,
             ));
         }
         NET_OP_PING => {
@@ -127,11 +137,19 @@ pub fn handle_syscall(op: u64) -> u64 {
                     status |= NET_ST_TX_OK;
                     serial::line(&alloc::format!(
                         "[NET] ICMP echo -> {}.{}.{}.{} — TX {} bytes (id=0x{:x} seq={})",
-                        gw.0[0], gw.0[1], gw.0[2], gw.0[3], len, 0xB1A4, seq,
+                        gw.0[0],
+                        gw.0[1],
+                        gw.0[2],
+                        gw.0[3],
+                        len,
+                        0xB1A4,
+                        seq,
                     ));
                 }
                 None => {
-                    serial::line("[NET] ICMP echo deferred: gateway MAC unresolved (run 'net arp')");
+                    serial::line(
+                        "[NET] ICMP echo deferred: gateway MAC unresolved (run 'net arp')",
+                    );
                 }
             }
         }
@@ -147,4 +165,3 @@ pub fn handle_syscall(op: u64) -> u64 {
     status |= ((stack.arp_entries() as u64) & 0xff) << NET_ST_ARP_ENTRIES_SHIFT;
     status
 }
-

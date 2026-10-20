@@ -184,11 +184,7 @@ fn run(cli: Cli) -> Result<()> {
                 stats.failed
             );
             if let Some(first) = stats.artifacts.first() {
-                println!(
-                    "  artifacts in {} ({} files)",
-                    out.display(),
-                    stats.artifacts.len()
-                );
+                println!("  artifacts in {} ({} files)", out.display(), stats.artifacts.len());
                 let _ = first; // listed count is enough for the summary
             }
             if stats.failed > 0 {

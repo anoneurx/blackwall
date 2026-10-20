@@ -162,12 +162,7 @@ impl<'a> TcpSegment<'a> {
     /// Serialize the segment and fill in the TCP checksum computed over the
     /// IPv4 pseudo-header (RFC 793 §3.1): source/dest address, zero, protocol
     /// 6, and the TCP length.
-    pub fn serialize_checksummed(
-        &self,
-        buffer: &mut Vec<u8>,
-        source: [u8; 4],
-        dest: [u8; 4],
-    ) {
+    pub fn serialize_checksummed(&self, buffer: &mut Vec<u8>, source: [u8; 4], dest: [u8; 4]) {
         let start = buffer.len();
         self.serialize(buffer);
         let checksum = compute_tcp_checksum(source, dest, &buffer[start..]);

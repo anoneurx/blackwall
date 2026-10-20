@@ -57,7 +57,11 @@ pub fn sys_fork(frame: *mut IrqFrame) -> u64 {
     unsafe {
         // SAFETY: the manager just allocated and zeroed this kernel stack, so
         // `child_frame` is a live, writable IrqFrame slot.
-        core::ptr::copy_nonoverlapping(frame as *const u8, child_frame as *mut u8, frame_size as usize);
+        core::ptr::copy_nonoverlapping(
+            frame as *const u8,
+            child_frame as *mut u8,
+            frame_size as usize,
+        );
         let cf = &mut *(child_frame as *mut IrqFrame);
         cf.rax = 0; // fork returns 0 in the child
     }
@@ -257,10 +261,8 @@ pub fn sys_waitpid(frame: *mut IrqFrame, pid: u64, status_ptr: u64) -> *mut IrqF
     }
 
     // 2. No matching child at all → ECHILD.
-    let has_children = sched
-        .manager()
-        .iter()
-        .any(|c| c.parent == me && (want == 0 || c.pid == want));
+    let has_children =
+        sched.manager().iter().any(|c| c.parent == me && (want == 0 || c.pid == want));
     if !has_children {
         unsafe { (*frame).rax = ECHILD as u64 };
         return core::ptr::null_mut();

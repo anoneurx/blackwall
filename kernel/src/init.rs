@@ -28,7 +28,6 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     crate::logging::set_level(crate::logging::LogLevel::Info);
     let mut memory_state = memory::init(&system_table);
 
-
     // ── Exit UEFI Boot Services ───────────────────────────────────────────────
     // All boot-services calls (allocate_pages, memory_map) are done by now.
     // We must exit before touching ANY hardware I/O (PIC, PIT, serial ports)
@@ -53,10 +52,7 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     // The page table the firmware left us in.  Kernel threads must switch
     // back to it whenever they leave a user task.
     let kernel_cr3 = trap::current_cr3();
-    memory::BOOT_CR3.store(
-        kernel_cr3 & !0xFFF_u64,
-        core::sync::atomic::Ordering::Relaxed,
-    );
+    memory::BOOT_CR3.store(kernel_cr3 & !0xFFF_u64, core::sync::atomic::Ordering::Relaxed);
 
     // ── Boot banner ──────────────────────────────────────────────────────────
     serial::line(messages::BOOT_BANNER);

@@ -2,8 +2,8 @@ use super::elf::{ElfLoader, PF_W, PF_X, R_X86_64_RELATIVE};
 use crate::arch::x86_64::serial;
 use crate::memory::{
     paging::{
-        align_up, PageTable, PageTableEntry, PAGE_HUGE, PAGE_NO_EXECUTE, PAGE_OWNED,
-        PAGE_PRESENT, PAGE_SIZE, PAGE_USER_ACCESSIBLE, PAGE_WRITABLE,
+        align_up, PageTable, PageTableEntry, PAGE_HUGE, PAGE_NO_EXECUTE, PAGE_OWNED, PAGE_PRESENT,
+        PAGE_SIZE, PAGE_USER_ACCESSIBLE, PAGE_WRITABLE,
     },
     physical::{PhysFrame, PhysicalMemoryManager},
     r#virtual::VirtualMemoryManager,
@@ -374,7 +374,6 @@ unsafe fn free_owned_table(table_phys: u64, depth: u32, pmm: &mut PhysicalMemory
     }
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry point
 // ─────────────────────────────────────────────────────────────────────────────
@@ -464,10 +463,9 @@ pub unsafe fn build_user_image_into(
         while page < last_page {
             match pages.iter_mut().find(|(v, _)| *v == page) {
                 Some((_, existing)) => {
-                    let writable = (*existing & PAGE_WRITABLE != 0)
-                        || (flags & PAGE_WRITABLE != 0);
-                    let no_exec = (*existing & PAGE_NO_EXECUTE != 0)
-                        && (flags & PAGE_NO_EXECUTE != 0);
+                    let writable = (*existing & PAGE_WRITABLE != 0) || (flags & PAGE_WRITABLE != 0);
+                    let no_exec =
+                        (*existing & PAGE_NO_EXECUTE != 0) && (flags & PAGE_NO_EXECUTE != 0);
                     let mut merged = *existing | flags;
                     if writable {
                         merged |= PAGE_WRITABLE;
@@ -567,9 +565,5 @@ pub unsafe fn build_user_image_into(
         ));
     }
 
-    UserImage {
-        cr3: user_p4_phys,
-        entry,
-        user_rsp: USER_STACK_TOP - 16,
-    }
+    UserImage { cr3: user_p4_phys, entry, user_rsp: USER_STACK_TOP - 16 }
 }

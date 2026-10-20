@@ -10,8 +10,7 @@
 
 use crate::arch::x86_64::trap::current_cr3;
 use crate::memory::paging::{
-    PageTable, PageTableEntry, PAGE_HUGE, PAGE_USER_ACCESSIBLE, PAGE_WRITABLE,
-    USER_SPACE_END,
+    PageTable, PageTableEntry, PAGE_HUGE, PAGE_USER_ACCESSIBLE, PAGE_WRITABLE, USER_SPACE_END,
 };
 
 /// Check that `[ptr, ptr + len)` is a fully-mapped user range under the

@@ -118,12 +118,12 @@ impl SecurityContext {
             59,   /* execve */
             60,   /* exit */
             61,   /* waitpid */
-            78,    /* readdir */
-            83,    /* mkdir */
-            84,    /* rmdir */
-            87,    /* unlink */
-            110,   /* getppid */
-            300,   /* net (SYS_NET control/query) */
+            78,   /* readdir */
+            83,   /* mkdir */
+            84,   /* rmdir */
+            87,   /* unlink */
+            110,  /* getppid */
+            300,  /* net (SYS_NET control/query) */
         ] {
             filter.add_rule(nr, FilterAction::Allow);
         }

@@ -345,9 +345,9 @@ pub fn verify_tree(root: &Path) -> Result<TreeVerifyReport> {
                 }
                 match client.head(url).send() {
                     Ok(resp) if resp.status().is_success() => report.url_ok += 1,
-                    Ok(resp) => report
-                        .url_broken
-                        .push((path.clone(), format!("HTTP {}", resp.status()))),
+                    Ok(resp) => {
+                        report.url_broken.push((path.clone(), format!("HTTP {}", resp.status())))
+                    }
                     Err(e) => report.url_broken.push((path.clone(), e.to_string())),
                 }
             }
@@ -460,9 +460,8 @@ fn download(url: &str, dir: &Path) -> Result<PathBuf> {
     for attempt in 1..=MAX_ATTEMPTS {
         match download_once(&client, url, &partial) {
             Ok(()) => {
-                std::fs::rename(&partial, &dest).with_context(|| {
-                    format!("Failed to finalize {}", dest.display())
-                })?;
+                std::fs::rename(&partial, &dest)
+                    .with_context(|| format!("Failed to finalize {}", dest.display()))?;
                 return Ok(dest);
             }
             Err(e) => {
@@ -479,11 +478,7 @@ fn download(url: &str, dir: &Path) -> Result<PathBuf> {
 }
 
 /// One full/partial-range fetch of `url` appended onto `partial`.
-fn download_once(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    partial: &Path,
-) -> Result<()> {
+fn download_once(client: &reqwest::blocking::Client, url: &str, partial: &Path) -> Result<()> {
     let start = partial.metadata().map(|m| m.len()).unwrap_or(0);
 
     let mut request = client.get(url);
@@ -568,8 +563,8 @@ fn stage_single_binary(archive: &Path, payload_dir: &Path, name: &str) -> Result
     let mut reader = open_maybe_compressed(archive)?;
     let target = payload_dir.join("usr/bin").join(name);
     std::fs::create_dir_all(target.parent().unwrap_or(payload_dir))?;
-    let mut out = File::create(&target)
-        .with_context(|| format!("Failed to create {}", target.display()))?;
+    let mut out =
+        File::create(&target).with_context(|| format!("Failed to create {}", target.display()))?;
     std::io::copy(&mut reader, &mut out).context("Decompress write error")?;
     #[cfg(unix)]
     {
