@@ -140,3 +140,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Panic handler: improved with location and halt
 - Userspace/init: fixed first-command race by draining leading CR/LF
 - Shell: added `anx` alias, all Linux commands retained
+
+## [Unreleased] — Phase 3 Progress
+### Added
+- Security: groundwork for SMEP/SMAP/NX/W^X hardening
+- Security: added SECURITY.md with vulnerability reporting policy
+- Docs: threat model outline
