@@ -24,7 +24,10 @@ pub fn start(system_table: SystemTable<Boot>) -> ! {
     serial::init();
 
     let _cpu_info = cpu::detect();
+    // Set default log level
+    crate::logging::set_level(crate::logging::LogLevel::Info);
     let mut memory_state = memory::init(&system_table);
+
 
     // ── Exit UEFI Boot Services ───────────────────────────────────────────────
     // All boot-services calls (allocate_pages, memory_map) are done by now.
