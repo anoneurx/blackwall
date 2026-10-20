@@ -38,3 +38,6 @@ pub mod thread;
 
 #[cfg(target_os = "uefi")]
 pub use init::start as kernel_main;
+
+#[cfg(test)]
+pub mod tests;

@@ -16,3 +16,6 @@ mod efi {
 fn main() {
     println!("blackwall-kernel host stub");
 }
+
+#[cfg(test)]
+mod tests;
