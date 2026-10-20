@@ -127,3 +127,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Network stack (TCP, UDP, IPv4, IPv6, ARP, DNS, ICMP, firewall kernel module)
 - Filesystem layer (VFS + Ext2)
 - Userspace init ELF (bare-metal, x86_64-unknown-none)
+
+## [Unreleased] — Phase 2 Progress
+### Added
+- Memory: PAGE_COW bit for copy-on-write groundwork
+- Syscalls: mmap/munmap numbers and stubs
+- Kernel: test harness modules wired into lib/main
+- SMP: APIC/LAPIC framework with INIT/SIPI trampoline present
+
+### Changed
+- Logging: structured levels + boot arg parsing
+- Panic handler: improved with location and halt
+- Userspace/init: fixed first-command race by draining leading CR/LF
+- Shell: added `anx` alias, all Linux commands retained
