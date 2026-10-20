@@ -146,3 +146,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Security: groundwork for SMEP/SMAP/NX/W^X hardening
 - Security: added SECURITY.md with vulnerability reporting policy
 - Docs: threat model outline
+
+## [Unreleased] — Phase 4 Progress
+### Added
+- Tracing: basic counters (syscalls/context switches)
