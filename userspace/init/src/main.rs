@@ -591,29 +591,69 @@ pub extern "C" fn _start() -> ! {
         if strcmp(word, "help") {
             write_str("Available commands:\n");
             write_str("  help             Show this message\n");
-            write_str("  ls [path]        List directory entries\n");
-            write_str("  cat <path>       Display file contents\n");
-            write_str("  mkdir <path>     Create a directory\n");
-            write_str("  rmdir <path>     Remove an empty directory\n");
-            write_str("  rm <path>        Remove a file\n");
-            write_str("  touch <path>     Create an empty file\n");
-            write_str("  echo [text]      Print text (supports > and >> redirect)\n");
-            write_str("  pwd              Print working directory\n");
-            write_str("  run <path>       Execute an ELF program (fork + execve + wait)\n");
-            write_str("  clear            Clear the terminal screen\n");
-            write_str("  net [arp|ping|state] — query or exercise the in-kernel network stack\n");
-            write_str("  anx              Package manager (alias for apt-like operations)\n");
-            write_str("  cd/pwd/ls/cat    Navigation and file operations\n");
-            write_str("  ps/kill/free     Process and resource management\n");
-            write_str("  whoami/hostname/uname/date/uptime/env/which/id\n");
-            write_str("  df/du/dmesg      Diagnostics\n");
-            write_str("  bw <cmd>         Black Wall system administration\n");
-            write_str("  service <name>   Service management\n");
+            write_blue("  ls");
+            write_str(" [path]        List directory entries\n");
+            write_blue("  cat");
+            write_str(" <path>       Display file contents\n");
+            write_blue("  mkdir");
+            write_str(" <path>     Create a directory\n");
+            write_blue("  rmdir");
+            write_str(" <path>     Remove an empty directory\n");
+            write_blue("  rm");
+            write_str(" <path>        Remove a file\n");
+            write_blue("  touch");
+            write_str(" <path>     Create an empty file\n");
+            write_blue("  echo");
+            write_str(" [text]      Print text (supports > and >> redirect)\n");
+            write_blue("  pwd");
+            write_str("              Print working directory\n");
+            write_blue("  run");
+            write_str(" <path>       Execute an ELF program (fork + execve + wait)\n");
+            write_blue("  clear");
+            write_str("            Clear the terminal screen\n");
+            write_cyan("  cd");
+            write_str("/");
+            write_cyan("pwd");
+            write_str("/");
+            write_cyan("ls");
+            write_str("/");
+            write_cyan("cat");
+            write_str("        Navigation and file operations\n");
+            write_yellow("  ps");
+            write_str("/");
+            write_yellow("kill");
+            write_str("/");
+            write_yellow("free");
+            write_str("     Process and resource management\n");
+            write_green("  whoami");
+            write_str("/");
+            write_green("hostname");
+            write_str("/");
+            write_green("uname");
+            write_str("/");
+            write_green("date");
+            write_str("/");
+            write_green("uptime");
+            write_str("/");
+            write_green("env");
+            write_str("/");
+            write_green("which");
+            write_str("/");
+            write_green("id");
+            write_str("\n");
+            write_str("  ");
+            write_blue("net");
+            write_str(" [arp|ping|state] — query or exercise the in-kernel network stack\n");
+            write_str("  ");
+            write_cyan("anx");
+            write_str("              Package manager (alias for apt-like operations)\n");
+            write_str("  ");
+            write_red("bw");
+            write_str(" <cmd>         Black Wall system administration\n");
+            write_str("  ");
+            write_cyan("service");
+            write_str(" <name>   Service management\n");
             write_str("  version/help     System info\n");
-            write_str("  tree/head/tail/grep/find/history/alias/basename/dirname/realpath\n");
-            write_str("  ip/route/ping/arp/users/groups/umask/cpuinfo/meminfo/lscpu/lsblk/lsusb/lspci/blkid\n");
-            write_str("  mount/umount/sync/reboot/shutdown/poweroff/halt/journalctl/logs/crontab/watch\n");
-            write_str("  su/sudo/passwd/auth/capabilities\n");
         } else if strcmp(word, "ls") {
             builtin_ls(cmd);
         } else if strcmp(word, "cat") {
@@ -1299,4 +1339,34 @@ fn builtin_exit(_cmd: &[u8]) {
         );
     }
     loop {}
+}
+
+fn write_cyan(s: &str) {
+    write_str("\x1B[36m");
+    write_str(s);
+    write_str("\x1B[0m");
+}
+
+fn write_blue(s: &str) {
+    write_str("\x1B[34m");
+    write_str(s);
+    write_str("\x1B[0m");
+}
+
+fn write_green(s: &str) {
+    write_str("\x1B[32m");
+    write_str(s);
+    write_str("\x1B[0m");
+}
+
+fn write_yellow(s: &str) {
+    write_str("\x1B[33m");
+    write_str(s);
+    write_str("\x1B[0m");
+}
+
+fn write_red(s: &str) {
+    write_str("\x1B[31m");
+    write_str(s);
+    write_str("\x1B[0m");
 }
