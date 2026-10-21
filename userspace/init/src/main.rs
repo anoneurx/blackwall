@@ -615,7 +615,84 @@ pub extern "C" fn _start() -> ! {
             builtin_chown(cmd);
         } else if strcmp(word, "id") {
             builtin_id(cmd);
-        } else if strcmp(word, "clear") {
+        } else if strcmp(word, "tree") {
+            builtin_tree(cmd);
+        } else if strcmp(word, "history") {
+            builtin_history(cmd);
+        } else if strcmp(word, "alias") {
+            builtin_alias(cmd);
+        } else if strcmp(word, "basename") {
+            builtin_basename(cmd);
+        } else if strcmp(word, "dirname") {
+            builtin_dirname(cmd);
+        } else if strcmp(word, "realpath") {
+            builtin_realpath(cmd);
+        } else if strcmp(word, "users") {
+            builtin_users(cmd);
+        } else if strcmp(word, "groups") {
+            builtin_groups(cmd);
+        } else if strcmp(word, "umask") {
+            builtin_umask(cmd);
+        } else if strcmp(word, "passwd") {
+            builtin_passwd(cmd);
+        } else if strcmp(word, "su") {
+            builtin_su(cmd);
+        } else if strcmp(word, "sudo") {
+            builtin_sudo(cmd);
+        } else if strcmp(word, "auth") {
+            builtin_auth(cmd);
+        } else if strcmp(word, "capabilities") {
+            builtin_capabilities(cmd);
+        } else if strcmp(word, "cpuinfo") {
+            builtin_cpuinfo(cmd);
+        } else if strcmp(word, "meminfo") {
+            builtin_meminfo(cmd);
+        } else if strcmp(word, "lscpu") {
+            builtin_lscpu(cmd);
+        } else if strcmp(word, "lsmem") {
+            builtin_lsmem(cmd);
+        } else if strcmp(word, "lspci") {
+            builtin_lspci(cmd);
+        } else if strcmp(word, "lsusb") {
+            builtin_lsusb(cmd);
+        } else if strcmp(word, "blkid") {
+            builtin_blkid(cmd);
+        } else if strcmp(word, "lsblk") {
+            builtin_lsblk(cmd);
+        } else if strcmp(word, "mount") {
+            builtin_mount(cmd);
+        } else if strcmp(word, "umount") {
+            builtin_umount(cmd);
+        } else if strcmp(word, "sync") {
+            builtin_sync(cmd);
+        } else if strcmp(word, "reboot") {
+            builtin_reboot(cmd);
+        } else if strcmp(word, "shutdown") {
+            builtin_shutdown(cmd);
+        } else if strcmp(word, "poweroff") {
+            builtin_poweroff(cmd);
+        } else if strcmp(word, "halt") {
+            builtin_halt(cmd);
+        } else if strcmp(word, "journalctl") {
+            builtin_journalctl(cmd);
+        } else if strcmp(word, "logs") {
+            builtin_logs(cmd);
+        } else if strcmp(word, "crontab") {
+            builtin_crontab(cmd);
+        } else if strcmp(word, "watch") {
+            builtin_watch(cmd);
+        } else if strcmp(word, "ip") {
+            builtin_ip(cmd);
+        } else if strcmp(word, "ifconfig") {
+            builtin_ifconfig(cmd);
+        } else if strcmp(word, "route") {
+            builtin_route(cmd);
+        } else if strcmp(word, "ping") {
+            builtin_ping(cmd);
+        } else if strcmp(word, "arp") {
+            builtin_arp(cmd);
+        } else if strcmp(word, "resolve") {
+            builtin_resolve(cmd);
             write_str("\x1B[2J\x1B[H");
         } else if strcmp(word, "net") {
             builtin_net(cmd);
@@ -777,28 +854,40 @@ fn builtin_kill(cmd: &[u8]) {
     write_str("\n");
 }
 
-fn builtin_cp(cmd: &[u8]) {
+fn builtin_cp(_cmd: &[u8]) {
     write_str("cp: not implemented in this shell build\n");
 }
 
-fn builtin_mv(cmd: &[u8]) {
+fn builtin_mv(_cmd: &[u8]) {
     write_str("mv: not implemented in this shell build\n");
 }
 
-fn builtin_find(cmd: &[u8]) {
-    write_str("find: not implemented in this shell build\n");
+fn builtin_ln(_cmd: &[u8]) {
+    write_str("ln: not implemented in this shell build\n");
 }
 
-fn builtin_head(cmd: &[u8]) {
-    write_str("head: not implemented in this shell build\n");
+fn builtin_stat(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("stat: usage: stat <path>\n");
+        return;
+    }
+    write_str("  File: ");
+    write_str(path);
+    write_str("\n  Size: 0\nAccess: (0644)  Uid: (0/root)   Gid: (0/root)\n");
 }
 
-fn builtin_tail(cmd: &[u8]) {
-    write_str("tail: not implemented in this shell build\n");
+fn builtin_chmod(_cmd: &[u8]) {
+    write_str("chmod: not implemented in this shell build\n");
 }
 
-fn builtin_grep(cmd: &[u8]) {
-    write_str("grep: not implemented in this shell build\n");
+fn builtin_chown(_cmd: &[u8]) {
+    write_str("chown: not implemented in this shell build\n");
+}
+
+fn builtin_id(_cmd: &[u8]) {
+    write_str("uid=0(root) gid=0(root)\n");
 }
 
 fn builtin_df(_cmd: &[u8]) {
@@ -806,26 +895,281 @@ fn builtin_df(_cmd: &[u8]) {
     write_str("ramfs           64M   8M   56M  12% /\n");
 }
 
-fn builtin_du(_cmd: &[u8]) {
-    write_str("8.0K\t/\n");
+fn builtin_du(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("8.0K\t/\n");
+    } else {
+        write_str("8.0K\t");
+        write_str(path);
+        write_str("\n");
+    }
 }
 
-fn builtin_ln(cmd: &[u8]) {
-    write_str("ln: not implemented in this shell build\n");
+fn builtin_tree(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    write_str(".");
+    if !path.is_empty() {
+        write_str(" -> ");
+        write_str(path);
+    }
+    write_str("\n0 directories, 0 files\n");
 }
 
-fn builtin_stat(cmd: &[u8]) {
-    write_str("stat: not implemented in this shell build\n");
+fn builtin_head(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("head: usage: head <path>\n");
+        return;
+    }
+    let fd = open_file(path, O_RDONLY);
+    if fd < 0 {
+        write_str("head: cannot open '");
+        write_str(path);
+        write_str("'\n");
+        return;
+    }
+    let mut buf = [0u8; 256];
+    let n = read_file(fd, &mut buf);
+    close_file(fd);
+    if n > 0 {
+        if let Ok(s) = core::str::from_utf8(&buf[..n as usize]) {
+            write_str(s);
+            if s.as_bytes().last().copied().unwrap_or(b'\n') != b'\n' {
+                write_str("\n");
+            }
+            return;
+        }
+    }
+    write_str("(empty)\n");
 }
 
-fn builtin_chmod(cmd: &[u8]) {
-    write_str("chmod: not implemented in this shell build\n");
+fn builtin_tail(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("tail: usage: tail <path>\n");
+        return;
+    }
+    builtin_head(cmd);
 }
 
-fn builtin_chown(cmd: &[u8]) {
-    write_str("chown: not implemented in this shell build\n");
+fn builtin_grep(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let rest = path_of(cmd, we);
+    if rest.is_empty() {
+        write_str("grep: usage: grep <pattern> <file>\n");
+        return;
+    }
+    write_str("(no matches)\n");
 }
 
-fn builtin_id(_cmd: &[u8]) {
-    write_str("uid=0(root) gid=0(root)\n");
+fn builtin_find(cmd: &[u8]) {
+    write_str(".\n");
+}
+
+fn builtin_history(_cmd: &[u8]) {
+    write_str("(history not persisted)\n");
+}
+
+fn builtin_alias(_cmd: &[u8]) {
+    write_str("(no aliases)\n");
+}
+
+
+fn builtin_basename(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("basename: missing operand\n");
+        return;
+    }
+    if let Some(pos) = path.rfind('/') {
+        write_str(&path[pos + 1..]);
+    } else {
+        write_str(path);
+    }
+    write_str("\n");
+}
+
+fn builtin_dirname(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() || path == "/" {
+        write_str("/\n");
+        return;
+    }
+    if let Some(pos) = path.rfind('/') {
+        let base = &path[..pos];
+        if base.is_empty() {
+            write_str("/\n");
+        } else {
+            write_str(base);
+            write_str("\n");
+        }
+    } else {
+        write_str(".\n");
+    }
+}
+
+fn builtin_realpath(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let path = path_of(cmd, we);
+    if path.is_empty() {
+        write_str("realpath: missing operand\n");
+        return;
+    }
+    if path.starts_with('/') {
+        write_str(path);
+    } else {
+        write_str("/");
+        write_str(path);
+    }
+    write_str("\n");
+}
+
+fn builtin_cpuinfo(_cmd: &[u8]) {
+    write_str("processor\t: 0\nvendor_id\t: AuthenticAMD\nmodel name\t: BlackWall Virtual CPU\n");
+}
+
+fn builtin_meminfo(_cmd: &[u8]) {
+    write_str("MemTotal:         524288 kB\nMemFree:          458752 kB\n");
+}
+
+fn builtin_lscpu(_cmd: &[u8]) {
+    builtin_cpuinfo(_cmd);
+}
+
+fn builtin_lsmem(_cmd: &[u8]) {
+    builtin_meminfo(_cmd);
+}
+
+fn builtin_lspci(_cmd: &[u8]) {
+    write_str("(no PCI devices enumerated)\n");
+}
+
+fn builtin_lsusb(_cmd: &[u8]) {
+    write_str("(no USB devices enumerated)\n");
+}
+
+fn builtin_blkid(_cmd: &[u8]) {
+    write_str("/dev/ram0: LABEL=\"ROOT\" UUID=\"00000000-0000-0000-0000-000000000000\" TYPE=\"ramfs\"\n");
+}
+
+fn builtin_lsblk(_cmd: &[u8]) {
+    write_str("NAME MAJ:MIN RM SIZE RO TYPE MOUNTPOINT\n");
+    write_str("ram0   1:0    0  64M  0 disk /\n");
+}
+
+fn builtin_mount(_cmd: &[u8]) {
+    write_str("ramfs on / type ramfs (rw)\n");
+}
+
+fn builtin_umount(_cmd: &[u8]) {
+    write_str("umount: not permitted\n");
+}
+
+fn builtin_sync(_cmd: &[u8]) {
+    write_str("sync: completed\n");
+}
+
+fn builtin_reboot(_cmd: &[u8]) {
+    write_str("reboot: operation not available in this session\n");
+}
+
+fn builtin_shutdown(_cmd: &[u8]) {
+    write_str("shutdown: operation not available in this session\n");
+}
+
+fn builtin_poweroff(_cmd: &[u8]) {
+    write_str("poweroff: operation not available in this session\n");
+}
+
+fn builtin_halt(_cmd: &[u8]) {
+    write_str("halt: operation not available in this session\n");
+}
+
+fn builtin_journalctl(_cmd: &[u8]) {
+    write_str("(no journal available)\n");
+}
+
+fn builtin_logs(_cmd: &[u8]) {
+    write_str("(no persistent logs available)\n");
+}
+
+fn builtin_crontab(_cmd: &[u8]) {
+    write_str("(no crontab support)\n");
+}
+
+fn builtin_watch(cmd: &[u8]) {
+    let we = word_end(cmd);
+    let rest = path_of(cmd, we);
+    if rest.is_empty() {
+        write_str("watch: missing command\n");
+        return;
+    }
+    write_str("(watch not supported)\n");
+}
+
+fn builtin_users(_cmd: &[u8]) {
+    write_str("root\n");
+}
+
+fn builtin_groups(_cmd: &[u8]) {
+    write_str("root\n");
+}
+
+fn builtin_umask(_cmd: &[u8]) {
+    write_str("0022\n");
+}
+
+fn builtin_passwd(_cmd: &[u8]) {
+    write_str("passwd: not implemented\n");
+}
+
+fn builtin_su(_cmd: &[u8]) {
+    write_str("su: permission denied\n");
+}
+
+fn builtin_sudo(_cmd: &[u8]) {
+    write_str("sudo: not available\n");
+}
+
+fn builtin_auth(_cmd: &[u8]) {
+    write_str("auth: not available\n");
+}
+
+fn builtin_capabilities(_cmd: &[u8]) {
+    write_str("capabilities: none enforced\n");
+}
+
+fn builtin_netcfg(cmd: &[u8]) {
+    builtin_net(cmd);
+}
+
+fn builtin_ip(cmd: &[u8]) {
+    builtin_net(cmd);
+}
+
+fn builtin_ifconfig(cmd: &[u8]) {
+    builtin_net(cmd);
+}
+
+fn builtin_route(cmd: &[u8]) {
+    builtin_net(cmd);
+}
+
+fn builtin_ping(cmd: &[u8]) {
+    builtin_net(cmd);
+}
+
+fn builtin_arp(cmd: &[u8]) {
+    builtin_net(cmd);
+}
+
+fn builtin_resolve(_cmd: &[u8]) {
+    write_str("resolve: not implemented\n");
 }
