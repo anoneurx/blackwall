@@ -587,6 +587,11 @@ pub extern "C" fn _start() -> ! {
             continue;
         }
         let word = &cmd[..word_end(cmd)];
+        // Echo command in blue
+        write_str("\x1B[34m");
+        write_str(core::str::from_utf8(word).unwrap_or(""));
+        write_str("\x1B[0m");
+        write_str("\n");
 
         if strcmp(word, "help") {
             write_str("Available commands:\n");
