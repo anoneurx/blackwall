@@ -610,6 +610,10 @@ pub extern "C" fn _start() -> ! {
             write_str("  bw <cmd>         Black Wall system administration\n");
             write_str("  service <name>   Service management\n");
             write_str("  version/help     System info\n");
+            write_str("  tree/head/tail/grep/find/history/alias/basename/dirname/realpath\n");
+            write_str("  ip/route/ping/arp/users/groups/umask/cpuinfo/meminfo/lscpu/lsblk/lsusb/lspci/blkid\n");
+            write_str("  mount/umount/sync/reboot/shutdown/poweroff/halt/journalctl/logs/crontab/watch\n");
+            write_str("  su/sudo/passwd/auth/capabilities\n");
         } else if strcmp(word, "ls") {
             builtin_ls(cmd);
         } else if strcmp(word, "cd") {
@@ -757,18 +761,10 @@ pub extern "C" fn _start() -> ! {
             builtin_net(cmd);
         } else if strcmp(word, "anx") {
             builtin_anx(cmd);
+        } else if strcmp(word, "clear") {
+            builtin_clear(cmd);
         } else if strcmp(word, "exit") {
-            write_str("Exiting shell...\n");
-            unsafe {
-                asm!(
-                    "syscall",
-                    in("rax") SYS_EXIT,
-                    in("rdi") 0,
-                    out("rcx") _,
-                    out("r11") _,
-                    options(nostack)
-                );
-            }
+            builtin_exit(cmd);
         } else {
             write_str("shell: command not found: ");
             if let Ok(s) = core::str::from_utf8(cmd) {
@@ -1270,4 +1266,23 @@ fn builtin_arp(cmd: &[u8]) {
 
 fn builtin_resolve(_cmd: &[u8]) {
     write_str("resolve: not implemented\n");
+}
+
+fn builtin_clear(_cmd: &[u8]) {
+    write_str("\x1B[2J\x1B[H");
+}
+
+fn builtin_exit(_cmd: &[u8]) {
+    write_str("Exiting shell...\n");
+    unsafe {
+        asm!(
+            "syscall",
+            in("rax") SYS_EXIT,
+            in("rdi") 0,
+            out("rcx") _,
+            out("r11") _,
+            options(nostack)
+        );
+    }
+    loop {}
 }
