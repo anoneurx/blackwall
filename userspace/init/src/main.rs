@@ -224,6 +224,65 @@ fn path_of(cmd: &[u8], after: usize) -> &str {
     }
     core::str::from_utf8(&cmd[start..]).unwrap_or("")
 }
+struct ShellState {
+    cwd: [u8; 256],
+    cwd_len: usize,
+}
+
+static mut SHELL_STATE: ShellState = ShellState { cwd: [b'/'; 256], cwd_len: 1 };
+
+fn get_cwd() -> &'static str {
+    unsafe {
+        core::str::from_utf8(&SHELL_STATE.cwd[..SHELL_STATE.cwd_len]).unwrap_or("/")
+    }
+}
+
+fn resolve_path(path: &str) -> [u8; 512] {
+    let mut out = [0u8; 512];
+    if path.is_empty() {
+        unsafe {
+            for i in 0..SHELL_STATE.cwd_len.min(512) {
+                out[i] = SHELL_STATE.cwd[i];
+            }
+        }
+        return out;
+    }
+    if path.starts_with('/') {
+        let bytes = path.as_bytes();
+        let len = bytes.len().min(511);
+        for i in 0..len {
+            out[i] = bytes[i];
+        }
+        return out;
+    }
+    // relative
+    unsafe {
+        let mut pos = 0;
+        // copy cwd
+        for i in 0..SHELL_STATE.cwd_len {
+            if pos < 511 {
+                out[pos] = SHELL_STATE.cwd[i];
+                pos += 1;
+            }
+        }
+        if SHELL_STATE.cwd_len > 0 && SHELL_STATE.cwd[SHELL_STATE.cwd_len - 1] != b'/' {
+            if pos < 511 {
+                out[pos] = b'/';
+                pos += 1;
+            }
+        }
+        let bytes = path.as_bytes();
+        for i in 0..bytes.len() {
+            if pos < 511 {
+                out[pos] = bytes[i];
+                pos += 1;
+            }
+        }
+    }
+    out
+}
+
+// ── Command implementations ──────────────────────────────────────────────────
 
 // ── Command implementations ──────────────────────────────────────────────────
 
@@ -730,12 +789,51 @@ fn builtin_cd(cmd: &[u8]) {
     let we = word_end(cmd);
     let path = path_of(cmd, we);
     if path.is_empty() {
-        write_str("/\n");
+        write_str(get_cwd());
+        write_str("\n");
         return;
     }
-    write_str("cd: ");
-    write_str(path);
-    write_str(": not available in this shell\n");
+    // Try to see if it's a directory by attempting readdir
+    let resolved = resolve_path(path);
+    // find length
+    let mut len = 0;
+    while len < resolved.len() && resolved[len] != 0 {
+        len += 1;
+    }
+    if len == 0 {
+        write_str("cd: invalid path\n");
+        return;
+    }
+    let (pb, _) = path_buf(core::str::from_utf8(&resolved[..len]).unwrap_or("/"));
+    let mut raw = [0u8; 64];
+    let n = syscall3(SYS_READDIR, pb.as_ptr() as u64, raw.as_mut_ptr() as u64, raw.len() as u64);
+    if (n as i64) < 0 {
+        write_str("cd: ");
+        write_str(path);
+        write_str(": not a directory\n");
+        return;
+    }
+    // Set cwd
+    unsafe {
+        // normalize
+        if len == 1 && resolved[0] == b'/' {
+            SHELL_STATE.cwd[0] = b'/';
+            SHELL_STATE.cwd_len = 1;
+        } else {
+            // simple copy
+            for i in 0..len {
+                if i < 255 {
+                    SHELL_STATE.cwd[i] = resolved[i];
+                }
+            }
+            // trim trailing slash if not root
+            let mut l = if len > 255 { 255 } else { len };
+            if l > 1 && SHELL_STATE.cwd[l - 1] == b'/' {
+                l -= 1;
+            }
+            SHELL_STATE.cwd_len = l;
+        }
+    }
 }
 
 fn builtin_whoami(_cmd: &[u8]) {
