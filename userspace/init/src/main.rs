@@ -616,6 +616,20 @@ pub extern "C" fn _start() -> ! {
             write_str("  su/sudo/passwd/auth/capabilities\n");
         } else if strcmp(word, "ls") {
             builtin_ls(cmd);
+        } else if strcmp(word, "cat") {
+            builtin_cat(cmd);
+        } else if strcmp(word, "mkdir") {
+            builtin_mkdir(cmd);
+        } else if strcmp(word, "rmdir") {
+            builtin_rmdir(cmd);
+        } else if strcmp(word, "rm") {
+            builtin_rm(cmd);
+        } else if strcmp(word, "touch") {
+            builtin_touch(cmd);
+        } else if strcmp(word, "echo") {
+            builtin_echo(cmd);
+        } else if strcmp(word, "run") {
+            builtin_run(cmd);
         } else if strcmp(word, "cd") {
             builtin_cd(cmd);
         } else if strcmp(word, "pwd") {
