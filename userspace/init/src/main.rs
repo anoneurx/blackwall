@@ -908,11 +908,121 @@ fn builtin_uname(cmd: &[u8]) {
 }
 
 fn builtin_uptime(_cmd: &[u8]) {
-    write_str("up 0 days, 00:00\n");
+    let secs = syscall3(SYS_SYSINFO, SYSINFO_OP_UPTIME, 0, 0);
+    if (secs as i64) < 0 {
+        write_str("uptime: unavailable\n");
+        return;
+    }
+    // The kernel returns whole seconds (PIT ticks / 100).
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+    write_u64(days);
+    write_str(" days, ");
+    if h < 10 {
+        write_str("0");
+    }
+    write_u64(h);
+    write_str(":");
+    if m < 10 {
+        write_str("0");
+    }
+    write_u64(m);
+    write_str("\n");
 }
 
+/// Convert epoch seconds to a UTC civil string: `YYYY-MM-DD HH:MM:SS UTC`.
+/// (Howard Hinnant's civil_from_days inverse algorithm.)
+fn format_epoch(secs: u64) -> [u8; 24] {
+    let mut out = [0u8; 24];
+    let days = (secs / 86400) as i64;
+    let rem = secs % 86400;
+    let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+
+    // Shift the civil epoch from 1970-03-01 to 1970-01-01.
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+
+    let mut pos = 0usize;
+    put_num(&mut out, &mut pos, y as u64, 4);
+    out[pos] = b'-';
+    pos += 1;
+    put_num(&mut out, &mut pos, mo as u64, 2);
+    out[pos] = b'-';
+    pos += 1;
+    put_num(&mut out, &mut pos, d as u64, 2);
+    out[pos] = b' ';
+    pos += 1;
+    put_num(&mut out, &mut pos, h, 2);
+    out[pos] = b':';
+    pos += 1;
+    put_num(&mut out, &mut pos, m, 2);
+    out[pos] = b':';
+    pos += 1;
+    put_num(&mut out, &mut pos, s, 2);
+    out[pos] = b' ';
+    pos += 1;
+    for c in b"UTC" {
+        if pos < out.len() {
+            out[pos] = *c;
+            pos += 1;
+        }
+    }
+    out
+}
+
+/// Write `v` zero-padded to at least `width` digits into `out` at `*pos`.
+fn put_num(out: &mut [u8; 24], pos: &mut usize, v: u64, width: usize) {
+    let mut digits = [0u8; 20];
+    let mut dl = 0usize;
+    let mut n = v;
+    if n == 0 {
+        digits[0] = b'0';
+        dl = 1;
+    }
+    while n > 0 {
+        digits[dl] = b'0' + (n % 10) as u8;
+        dl += 1;
+        n /= 10;
+    }
+    while dl < width {
+        digits[dl] = b'0';
+        dl += 1;
+    }
+    while dl > 0 && *pos < out.len() {
+        dl -= 1;
+        out[*pos] = digits[dl];
+        *pos += 1;
+    }
+    if *pos < out.len() {
+        out[*pos] = 0;
+    }
+}
+
+/// `date` prints the real wall-clock time reported by the RTC, expressed as
+/// Unix epoch (UTC) the kernel has already normalized (RTC advisers BCD).
 fn builtin_date(_cmd: &[u8]) {
-    write_str("2026-01-01 00:00:00 UTC\n");
+    let epoch = syscall3(SYS_SYSINFO, SYSINFO_OP_TIME, 0, 0);
+    if (epoch as i64) < 0 || epoch == 0 {
+        write_str("date: RTC unavailable\n");
+        return;
+    }
+    let s = format_epoch(epoch);
+    let n = s.iter().position(|&b| b == 0).unwrap_or(s.len());
+    match core::str::from_utf8(&s[..n]) {
+        Ok(txt) => write_str(txt),
+        Err(_) => write_str("date: format error"),
+    }
+    write_str("\n");
 }
 
 fn builtin_env(_cmd: &[u8]) {
@@ -1008,15 +1118,154 @@ fn builtin_kill(cmd: &[u8]) {
 }
 
 fn builtin_cp(_cmd: &[u8]) {
-    write_str("cp: not implemented in this shell build\n");
+    builtin_copy(_cmd, /* remove_src */ false);
 }
 
 fn builtin_mv(_cmd: &[u8]) {
-    write_str("mv: not implemented in this shell build\n");
+    builtin_copy(_cmd, /* remove_src */ true);
 }
 
 fn builtin_ln(_cmd: &[u8]) {
-    write_str("ln: not implemented in this shell build\n");
+    // No symlink nodes exist in the VFS; a hard link is a copy+write.
+    builtin_copy_and_keep(_cmd);
+}
+
+/// One-arg split on ASCII whitespace; returns up to `n` non-empty fields.
+fn args_of(cmd: &[u8], skip: usize, n: usize) -> ([&str; 2], usize) {
+    let mut out: [&str; 2] = ["", ""];
+    let mut count = 0usize;
+    let mut i = skip;
+    while i < cmd.len() && count < n {
+        while i < cmd.len() && (cmd[i] == b' ' || cmd[i] == b'\t') {
+            i += 1;
+        }
+        if i >= cmd.len() {
+            break;
+        }
+        let start = i;
+        while i < cmd.len() && cmd[i] != b' ' && cmd[i] != b'\t' {
+            i += 1;
+        }
+        if let Ok(s) = core::str::from_utf8(&cmd[start..i]) {
+            out[count] = s;
+        }
+        count += 1;
+    }
+    (out, count)
+}
+
+fn stat_is_dir(path: &str) -> bool {
+    let (pb, _) = path_buf(path);
+    let mut dt: u8 = 0;
+    let r = syscall3(SYS_STAT, pb.as_ptr() as u64, 0, &mut dt as *mut u8 as u64);
+    (r as i64) >= 0 && dt == DT_DIR
+}
+
+fn builtin_copy(cmd: &[u8], remove_src: bool) -> () {
+    let verb = if remove_src { "mv" } else { "cp" };
+    let (args, nargs) = args_of(cmd, 2, 2);
+    if nargs < 2 || args[0].is_empty() || args[1].is_empty() {
+        write_str(verb);
+        write_str(": usage: ");
+        write_str(verb);
+        write_str(" <src> <dst>\n");
+        return;
+    }
+    let (src, mut dst) = (args[0], args[1]);
+    // Final destination path buffer so `cp a dir` can join names without
+    // heap allocation (no_std).
+    let mut dst_final = [0u8; 512];
+    if stat_is_dir(src) {
+        write_str(verb);
+        write_str(": omitting directory '");
+        write_str(src);
+        write_str("' (no -r yet)\n");
+        return;
+    }
+    // `cp a dir` → `dir/basename(a)`
+    if stat_is_dir(dst) {
+        let base = match src.rfind('/') {
+            Some(i) if i + 1 < src.len() => &src[i + 1..],
+            _ => src,
+        };
+        let mut pos = 0usize;
+        for &b in dst.as_bytes() {
+            if pos < dst_final.len() {
+                dst_final[pos] = b;
+                pos += 1;
+            }
+        }
+        if pos > 0 && pos < dst_final.len() && dst_final[pos - 1] != b'/' {
+            dst_final[pos] = b'/';
+            pos += 1;
+        }
+        for &b in base.as_bytes() {
+            if pos < dst_final.len() {
+                dst_final[pos] = b;
+                pos += 1;
+            }
+        }
+        if pos < dst_final.len() {
+            dst_final[pos] = 0;
+        }
+        match core::str::from_utf8(&dst_final[..pos]) {
+            Ok(s) => dst = s,
+            Err(_) => {
+                write_str(verb);
+                write_str(": invalid destination\n");
+                return;
+            }
+        }
+    }
+    let sfd = open_file(src, O_RDONLY);
+    if sfd < 0 {
+        write_str(verb);
+        write_str(": cannot stat '");
+        write_str(src);
+        write_str("'\n");
+        return;
+    }
+    let dfd = open_file(dst, O_WRONLY | O_CREAT | O_TRUNC);
+    if dfd < 0 {
+        write_str(verb);
+        write_str(": cannot create '");
+        write_str(dst);
+        write_str("'\n");
+        close_file(sfd);
+        return;
+    }
+    let mut buf = [0u8; 512];
+    let mut ok = true;
+    loop {
+        let n = read_file(sfd, &mut buf);
+        if n < 0 {
+            ok = false;
+            break;
+        }
+        if n == 0 {
+            break;
+        }
+        if write_file(dfd, &buf[..n as usize]) != n {
+            ok = false;
+            break;
+        }
+    }
+    close_file(sfd);
+    close_file(dfd);
+    if !ok {
+        write_str(verb);
+        write_str(": copy failed\n");
+        return;
+    }
+    if remove_src && unlink_path(src) < 0 {
+        write_str("mv: cannot remove '");
+        write_str(src);
+        write_str("'\n");
+    }
+}
+
+fn builtin_copy_and_keep(_cmd: &[u8]) {
+    write_str("ln: symlinks not supported yet (VFS has no link nodes)\n");
 }
 
 fn builtin_stat(cmd: &[u8]) {
@@ -1120,7 +1369,7 @@ fn builtin_grep(cmd: &[u8]) {
     write_str("(no matches)\n");
 }
 
-fn builtin_find(cmd: &[u8]) {
+fn builtin_find(_cmd: &[u8]) {
     write_str(".\n");
 }
 
@@ -1201,7 +1450,75 @@ fn builtin_lsmem(_cmd: &[u8]) {
 }
 
 fn builtin_lspci(_cmd: &[u8]) {
-    write_str("(no PCI devices enumerated)\n");
+    let mut buf = [0u8; 700];
+    let count = syscall3(SYS_SYSINFO, SYSINFO_OP_PCI, buf.as_mut_ptr() as u64, buf.len() as u64);
+    if (count as i64) <= 0 {
+        write_str("lspci: PCI device list unavailable\n");
+        return;
+    }
+    let count = count as usize;
+    let mut pos = 0usize;
+    while pos + 10 <= count * 10 && pos + 10 <= buf.len() {
+        let bus = buf[pos];
+        let slot = buf[pos + 1];
+        let func = buf[pos + 2];
+        let vid = buf[pos + 3] as u16 | ((buf[pos + 4] as u16) << 8);
+        let did = buf[pos + 5] as u16 | ((buf[pos + 6] as u16) << 8);
+        let class_code = buf[pos + 7];
+        let subclass = buf[pos + 8];
+        // prog_if at buf[pos+9]
+        write_hex2(bus);
+        write_str(":");
+        write_hex2(slot);
+        write_str(".");
+        write_u64(func as u64);
+        write_str(" ");
+        write_hex4(vid);
+        write_str(":");
+        write_hex4(did);
+        write_str("  ");
+        write_str(pci_class_name(class_code, subclass));
+        write_str("\n");
+        pos += 10;
+    }
+}
+
+fn write_hex4(v: u16) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let b = [HEX[((v >> 12) & 0xF) as usize], HEX[((v >> 8) & 0xF) as usize], HEX[((v >> 4) & 0xF) as usize], HEX[(v & 0xF) as usize]];
+    write_str(core::str::from_utf8(&b).unwrap_or("???"));
+}
+
+fn write_hex2(v: u8) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let b = [HEX[((v >> 4) & 0xF) as usize], HEX[(v & 0xF) as usize]];
+    write_str(core::str::from_utf8(&b).unwrap_or("??"));
+}
+
+fn pci_class_name(class_code: u8, subclass: u8) -> &'static str {
+    match class_code {
+        0x00 => "Unclassified",
+        0x01 => match subclass {
+            0x00 => "SCSI Controller",
+            0x01 => "IDE Controller",
+            0x05 => "ATA Controller",
+            0x06 => "AHCI (SATA) Controller",
+            0x08 => "NVMe Controller",
+            _ => "Mass Storage Device",
+        },
+        0x02 => "Network Controller",
+        0x03 => "Display Controller",
+        0x04 => "Multimedia Device",
+        0x05 => "Memory Controller",
+        0x06 => "Bridge Device",
+        0x0c => match subclass {
+            0x00 => "FireWire Controller",
+            0x03 => "USB Controller",
+            0x05 => "SMBus Controller",
+            _ => "Serial Bus Controller",
+        },
+        _ => "Unclassified PCI Device",
+    }
 }
 
 fn builtin_lsusb(_cmd: &[u8]) {
@@ -1229,20 +1546,30 @@ fn builtin_sync(_cmd: &[u8]) {
     write_str("sync: completed\n");
 }
 
-fn builtin_reboot(_cmd: &[u8]) {
-    write_str("reboot: operation not available in this session\n");
-}
-
 fn builtin_shutdown(_cmd: &[u8]) {
-    write_str("shutdown: operation not available in this session\n");
+    write_str("shutdown: powerdown issued\n");
+    powerdown_request();
 }
 
 fn builtin_poweroff(_cmd: &[u8]) {
-    write_str("poweroff: operation not available in this session\n");
+    write_str("poweroff: powerdown issued\n");
+    powerdown_request();
 }
 
 fn builtin_halt(_cmd: &[u8]) {
-    write_str("halt: operation not available in this session\n");
+    write_str("halt: powerdown issued\n");
+    powerdown_request();
+}
+
+fn builtin_reboot(_cmd: &[u8]) {
+    write_str("reboot: not supported yet (no ACPI reset path)\n");
+}
+
+/// Ask the kernel to power the machine down. In QEMU (test runs) this ends
+/// the VM through `isa-debug-exit`; on real hardware the ACPI S5 path is
+/// still pending, so the message is the honest behavior for now.
+fn powerdown_request() {
+    syscall1(SYS_SYSINFO, SYSINFO_OP_POWERDOWN);
 }
 
 fn builtin_journalctl(_cmd: &[u8]) {
@@ -1299,10 +1626,6 @@ fn builtin_capabilities(_cmd: &[u8]) {
     write_str("capabilities: none enforced\n");
 }
 
-fn builtin_netcfg(cmd: &[u8]) {
-    builtin_net(cmd);
-}
-
 fn builtin_ip(cmd: &[u8]) {
     builtin_net(cmd);
 }
@@ -1333,6 +1656,16 @@ fn builtin_clear(_cmd: &[u8]) {
 
 fn builtin_exit(_cmd: &[u8]) {
     write_str("Exiting shell...\n");
+    unsafe {
+        asm!(
+            "syscall",
+            in("rax") SYS_SYSINFO,
+            in("rdi") SYSINFO_OP_POWERDOWN,
+            out("rcx") _,
+            out("r11") _,
+            options(nostack)
+        );
+    }
     unsafe {
         asm!(
             "syscall",
