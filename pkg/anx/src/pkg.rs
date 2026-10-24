@@ -125,7 +125,7 @@ pub fn list_installed() -> Result<()> {
     let mut count = 0;
     let mut entries: Vec<InstalledPackage> = std::fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "toml"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
         .filter_map(|e| {
             std::fs::read_to_string(e.path()).ok().and_then(|s| toml::from_str(&s).ok())
         })

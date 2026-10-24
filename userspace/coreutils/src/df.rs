@@ -27,8 +27,8 @@ fn main() {
         let mount = parts[1];
 
         // Skip pseudo-filesystems in normal view.
-        if !args.iter().any(|a| a == "-a" || a == "--all") {
-            if [
+        if !args.iter().any(|a| a == "-a" || a == "--all")
+            && [
                 "proc",
                 "sysfs",
                 "devtmpfs",
@@ -49,7 +49,6 @@ fn main() {
             {
                 continue;
             }
-        }
 
         let (size, used, avail) = statfs(mount);
         if size == 0 {

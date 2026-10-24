@@ -196,7 +196,7 @@ impl BlockDevice for MemBlockDevice {
 
     fn read_sectors(&self, lba: u64, buf: &mut [u8]) -> Result<(), VfsError> {
         let ss = self.sector_size as usize;
-        if buf.len() % ss != 0 {
+        if !buf.len().is_multiple_of(ss) {
             return Err(VfsError::IOError);
         }
         let start = (lba as usize) * ss;
@@ -211,7 +211,7 @@ impl BlockDevice for MemBlockDevice {
 
     fn write_sectors(&self, lba: u64, buf: &[u8]) -> Result<(), VfsError> {
         let ss = self.sector_size as usize;
-        if buf.len() % ss != 0 {
+        if !buf.len().is_multiple_of(ss) {
             return Err(VfsError::IOError);
         }
         let start = (lba as usize) * ss;

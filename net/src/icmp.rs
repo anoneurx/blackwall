@@ -116,6 +116,10 @@ pub fn build_echo_request(
 }
 
 /// Shared Ethernet+IPv4+ICMP framing for outgoing echo traffic.
+// `allow(too_many_arguments)`: the parameter list mirrors the layered
+// protocol header fields (Ethernet + IPv4 + ICMP) 1:1, which keeps the
+// serializer reviewable; a builder struct would obscure the frame layout.
+#[allow(clippy::too_many_arguments)]
 fn build_echo(
     icmp_type: IcmpType,
     src_mac: &[u8; 6],

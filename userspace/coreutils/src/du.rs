@@ -51,7 +51,7 @@ fn dir_size(path: &std::path::Path, depth: usize, maxdepth: Option<usize>, human
                 p.metadata().map(|m| m.len()).unwrap_or(0)
             };
             total += size;
-            let show = maxdepth.map_or(true, |md| depth < md);
+            let show = maxdepth.is_none_or(|md| depth < md);
             if p.is_dir() && show {
                 println!("{}\t{}", fmt(size, human), p.display());
             }

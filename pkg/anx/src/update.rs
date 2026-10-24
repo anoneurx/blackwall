@@ -26,7 +26,7 @@ pub fn run(quiet: bool) -> Result<()> {
 
     let installed: Vec<pkg::InstalledPackage> = std::fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "toml"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
         .filter_map(|e| {
             std::fs::read_to_string(e.path()).ok().and_then(|s| toml::from_str(&s).ok())
         })
@@ -66,9 +66,9 @@ pub fn run(quiet: bool) -> Result<()> {
     // Step 3: Install each upgrade.
     for (installed_pkg, _entry) in &upgrades {
         // Remove old version first.
-        crate::remove::run(&[installed_pkg.name.clone()], quiet, true)?;
+        crate::remove::run(std::slice::from_ref(&installed_pkg.name), quiet, true)?;
         // Install new version.
-        crate::install::run(&[installed_pkg.name.clone()], false, quiet, true)?;
+        crate::install::run(std::slice::from_ref(&installed_pkg.name), false, quiet, true)?;
     }
 
     if !quiet {

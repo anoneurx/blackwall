@@ -40,7 +40,7 @@ impl Field {
             Field::Exact(n) => *n == value,
             Field::List(ns) => ns.contains(&value),
             Field::Range(lo, hi) => value >= *lo && value <= *hi,
-            Field::Step(step) => value % step == 0,
+            Field::Step(step) => value.is_multiple_of(*step),
         }
     }
 }
@@ -50,12 +50,12 @@ fn parse_field(s: &str) -> Field {
         return Field::Any;
     }
     if s.starts_with("*/") {
-        if let Ok(step) = s[2..].parse() {
+        if let Ok(step) = s.strip_prefix("*/").unwrap().parse() {
             return Field::Step(step);
         }
     }
     if s.contains(',') {
-        let ns: Vec<u32> = s.split(',').filter_map(|p| p.parse().ok()).collect();
+        let ns: Vec<u32> = s.split(',').map_while(|p| p.parse().ok()).collect();
         return Field::List(ns);
     }
     if s.contains('-') {
@@ -108,7 +108,7 @@ fn load_entries() -> Vec<CronEntry> {
     // Load /etc/cron.d/*.cron.
     if let Ok(rd) = std::fs::read_dir("/etc/cron.d") {
         for file in rd.filter_map(|e| e.ok()) {
-            if file.path().extension().map_or(false, |x| x == "cron") {
+            if file.path().extension().is_some_and(|x| x == "cron") {
                 if let Ok(content) = std::fs::read_to_string(file.path()) {
                     for line in content.lines() {
                         if let Some(entry) = parse_line(line) {
@@ -136,7 +136,7 @@ fn current_time() -> (u32, u32, u32, u32, u32) {
         });
 
     let s = String::from_utf8_lossy(&output.stdout);
-    let parts: Vec<u32> = s.trim().split_whitespace().filter_map(|p| p.parse().ok()).collect();
+    let parts: Vec<u32> = s.split_whitespace().filter_map(|p| p.parse().ok()).collect();
 
     if parts.len() < 5 {
         return (0, 0, 1, 1, 1);

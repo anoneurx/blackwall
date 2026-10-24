@@ -25,7 +25,7 @@ fn main() {
 
     let mut lines: Vec<String> = Vec::new();
     let read = |reader: Box<dyn BufRead>| -> Vec<String> {
-        reader.lines().filter_map(|l| l.ok()).collect()
+        reader.lines().map_while(Result::ok).collect()
     };
 
     if files.is_empty() {

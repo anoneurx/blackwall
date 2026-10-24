@@ -36,7 +36,7 @@ pub mod serial {
         unsafe {
             outb(COM1_PORT + 1, 0x00);
             outb(COM1_PORT + 3, 0x80);
-            outb(COM1_PORT + 0, 0x03);
+            outb(COM1_PORT, 0x03);
             outb(COM1_PORT + 1, 0x00);
             outb(COM1_PORT + 3, 0x03);
             outb(COM1_PORT + 2, 0xc7);
@@ -122,6 +122,25 @@ pub mod syscall {
     // Blackwall-specific extension syscalls (outside the Linux range).
     /// Network control/query: `r0` selects the operation (see `net` module).
     pub const SYS_NET: u64 = 300;
+    /// System info: `r0` selects the operation (see [`SYSINFO_OP_*`]).
+    ///
+    /// Operations that return data use `rsi` (a1) as a user buffer pointer
+    /// and `rdx` (a2) as its length, mirroring the readdir convention.
+    pub const SYS_SYSINFO: u64 = 301;
+
+    // SYS_SYSINFO operations — passed in `r0`.
+    /// Return the wall-clock time as Unix epoch seconds (UTC) in `rax`.
+    pub const SYSINFO_OP_TIME: u64 = 0;
+    /// Return uptime in seconds (PIT ticks / 100) in `rax`.
+    pub const SYSINFO_OP_UPTIME: u64 = 1;
+    /// Fill `a1`/`a2` with packed PCI entries, return the device count.
+    ///
+    /// Record layout — exactly 10 bytes each, repeated:
+    ///   [u8 bus][u8 slot][u8 func][u16 LE vendor][u16 LE device]
+    ///   [u8 class][u8 subclass][u8 prog_if]
+    pub const SYSINFO_OP_PCI: u64 = 2;
+    /// Power the machine down (QEMU isa-debug-exit; harmless write elsewhere).
+    pub const SYSINFO_OP_POWERDOWN: u64 = 3;
 
     // open(2) flags — Linux-compatible bit values.
     pub const O_RDONLY: u64 = 0;

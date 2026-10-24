@@ -64,11 +64,11 @@ impl Config {
     }
 
     fn is_remote(&self) -> bool {
-        let host_part = self.destination.splitn(2, ':').next().unwrap_or("");
-        let has_port = self.destination.contains(':')
+        let host_part = self.destination.split(':').next().unwrap_or("");
+        
+        self.destination.contains(':')
             && !self.destination.starts_with('/')
-            && !host_part.is_empty();
-        has_port
+            && !host_part.is_empty()
     }
 }
 
@@ -225,8 +225,8 @@ pub fn list(cfg: &Config) -> Result<Vec<Backup>> {
     let mut out = Vec::new();
 
     let local_dir = PathBuf::from(&cfg.destination);
-    if !cfg.is_remote() {
-        if local_dir.exists() {
+    if !cfg.is_remote()
+        && local_dir.exists() {
             for entry in fs::read_dir(&local_dir)? {
                 let entry = entry?;
                 if !entry.path().is_dir() {
@@ -245,7 +245,6 @@ pub fn list(cfg: &Config) -> Result<Vec<Backup>> {
                 }
             }
         }
-    }
 
     let remote_dir = PathBuf::from(&cfg.state_dir).join("remote");
     if remote_dir.exists() {
@@ -262,7 +261,7 @@ pub fn list(cfg: &Config) -> Result<Vec<Backup>> {
                     size_bytes: m.size_bytes,
                     paths: m.paths,
                     remote: m.remote,
-                    source: format!("{}", m.destination),
+                    source: m.destination.to_string(),
                 });
             }
         }

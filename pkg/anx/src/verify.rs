@@ -56,7 +56,7 @@ pub fn verify_gpg(data_path: &Path, sig_path: &Path, keyring_dir: &Path) -> Resu
     let key_files: Vec<_> = std::fs::read_dir(keyring_dir)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map_or(false, |x| x == "gpg" || x == "asc"))
+                .filter(|e| e.path().extension().is_some_and(|x| x == "gpg" || x == "asc"))
                 .collect()
         })
         .unwrap_or_default();

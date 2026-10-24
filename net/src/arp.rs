@@ -121,6 +121,13 @@ pub struct ArpTable {
     entries: Vec<ArpEntry>,
 }
 
+/// Mirrors [`ArpTable::new`], added for `clippy::new_without_default`.
+impl Default for ArpTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArpTable {
     pub fn new() -> Self {
         Self { entries: Vec::new() }

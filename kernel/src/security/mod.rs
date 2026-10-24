@@ -124,6 +124,7 @@ impl SecurityContext {
             87,   /* unlink */
             110,  /* getppid */
             300,  /* net (SYS_NET control/query) */
+            301,  /* sysinfo (time/uptime/pci/powerdown) */
         ] {
             filter.add_rule(nr, FilterAction::Allow);
         }

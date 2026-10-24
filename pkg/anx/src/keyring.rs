@@ -64,7 +64,7 @@ pub fn list() -> Result<()> {
 
     let keys: Vec<_> = std::fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "gpg" || x == "asc"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "gpg" || x == "asc"))
         .collect();
 
     if keys.is_empty() {

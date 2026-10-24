@@ -77,6 +77,8 @@ pub fn generate(packages_dir: &Path, base_url: &str) -> Result<Vec<RepoEntry>> {
 }
 
 /// Extract and parse the `MANIFEST.toml` embedded in an `.anxpkg` archive.
+/// Read the packaged `MANIFEST.toml` back out of a `.anxpkg` (test helper).
+#[cfg(test)]
 pub fn read_manifest_public(pkg_path: &Path) -> Result<ManifestMeta> {
     read_manifest(pkg_path)
 }

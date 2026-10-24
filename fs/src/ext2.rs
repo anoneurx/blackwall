@@ -349,7 +349,7 @@ impl Ext2Fs {
             return Err(VfsError::FileNotFound);
         }
         let group = ((ino - 1) / self.inodes_per_group as u64) as u32;
-        let index = ((ino - 1) % self.inodes_per_group as u64) as u64;
+        let index = (ino - 1) % self.inodes_per_group as u64;
         if group >= self.groups {
             return Err(VfsError::FileNotFound);
         }
@@ -690,7 +690,7 @@ impl Ext2Fs {
         let mut node = self.read_inode(inode)?;
         if end > self.inode_size_of(&node) {
             wr32(&mut node, IN_SIZE, end as u32);
-            wr32(&mut node, IN_BLOCKS, (end / SECTOR_SIZE as u64) as u32);
+            wr32(&mut node, IN_BLOCKS, (end / SECTOR_SIZE) as u32);
             self.write_inode(inode, &node)?;
         }
         Ok(done)

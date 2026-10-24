@@ -115,7 +115,6 @@ pub fn pci_write(bus: u8, slot: u8, func: u8, offset: u8, value: u32) {
 pub fn scan_bus() -> Vec<PciDevice> {
     let mut devices = Vec::new();
     serial::line("[PCI] Initiating PCI bus scan...");
-
     for bus in 0..=255 {
         for slot in 0..32 {
             // Check first function of device
@@ -160,7 +159,26 @@ pub fn scan_bus() -> Vec<PciDevice> {
         }
     }
     serial::line(&alloc::format!("[PCI] Scan complete. Found {} devices.", devices.len()));
+    *SCANNED.lock() = devices.clone();
     devices
+}
+
+/// Devices found by the last [`scan_bus`], in scan order, for
+/// `SYS_SYSINFO/SYSINFO_OP_PCI`. Empty until the boot scan has run.
+static SCANNED: crate::sync::spin::SpinLock<Vec<PciDevice>> =
+    crate::sync::spin::SpinLock::new(Vec::new());
+
+/// Clone of the cached PCI device list; falls back to a fresh scan if the
+/// boot-phase one never stored anything (kernel diagnostics used post-boot).
+pub fn cached_devices() -> Vec<PciDevice> {
+    let cached = SCANNED.lock().clone();
+    if cached.is_empty() {
+        let fresh = scan_bus();
+        *SCANNED.lock() = fresh.clone();
+        fresh
+    } else {
+        cached
+    }
 }
 
 fn log_device(dev: &PciDevice) {

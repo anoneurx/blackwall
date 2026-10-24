@@ -41,7 +41,7 @@ fn main() {
             } else {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::IsADirectory,
-                    format!("is a directory (use -r to remove)"),
+                    "is a directory (use -r to remove)".to_string(),
                 ))
             }
         } else {

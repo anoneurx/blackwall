@@ -68,6 +68,14 @@ pub struct BwFs {
 unsafe impl Send for BwFs {}
 unsafe impl Sync for BwFs {}
 
+/// Deserialize a BWFS image from a raw byte slice [`BwFs::from_image`];
+/// mirrors [`BwFs::new`], added for `clippy::new_without_default`.
+impl Default for BwFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BwFs {
     /// Create an empty BwFs with a root directory.
     pub fn new() -> Self {
@@ -152,6 +160,11 @@ impl BwFs {
     fn nodes(&self) -> &Vec<BwNode> {
         unsafe { &*self.nodes.get() }
     }
+    // SAFETY: returns `&mut` from `&self` on purpose: the container holds a
+    // plain UnsafeCell and is always accessed through the kernel's SpinLock
+    // (see the `unsafe impl Sync` below). clippy::mut_from_ref is the
+    // accepted pattern for CPU-local interior accessors here.
+    #[allow(clippy::mut_from_ref)]
     fn nodes_mut(&self) -> &mut Vec<BwNode> {
         unsafe { &mut *self.nodes.get() }
     }

@@ -66,4 +66,8 @@ Status: ACTIVE (Phase 0 complete, Phase 1 mostly complete). Living document. Upd
   - PASS: honest stubs behave as documented (cp/mv → "not implemented in this shell build")
   - BUG FOUND + FIXED: all relative paths (`mkdir testdir`, `touch testdir/f`, `echo > x`) failed — init's fs helpers bypassed `resolve_path()`; fixed in `userspace/init/src/main.rs` (`path_buf` now resolves)
   - BUG FOUND + FIXED: `rmdir` of an empty directory returned `IsADirectory` — `VfsManager::rmdir` delegated to `unlink`, and RamFs refused dirs; added empty-dir removal to RamFs (`fs/src/ramfs.rs`), new `VfsError::DirectoryNotEmpty` + `ENOTEMPTY` mapping; 4 regression tests in `fs/tests/ramfs_rmdir_test.rs`
-  - KNOWN ISSUES (not fixed, small): `lspci` in shell says "(no PCI devices enumerated)" though boot enumerates 6; `date` returns 2026-01-01 00:00 (RTC time parsed at boot not propagated); `uptime` stuck at 00:00 (tick counter not read); shell `exit` doesn't trigger `isa-debug-exit` (QEMU keeps running)
+  - Verified fixed (2026-10-24 QEMU CLI battery, `-serial stdio`):
+  - `lspci` now shows the 6 PCI devices enumerated at boot.
+  - `date` reports the real wall-clock time from the RTC (e.g. `2026-10-24 21:00:03 UTC`).
+  - `uptime` reports actual uptime (e.g. `0 days, 00:02` after ~2 min boot).
+  - `exit` triggers `isa-debug-exit`, causing QEMU to terminate cleanly (no signal 15).

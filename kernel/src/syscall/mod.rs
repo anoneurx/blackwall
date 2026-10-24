@@ -9,6 +9,7 @@ use blackwall_shared::syscall::*;
 
 pub mod fs;
 pub mod process;
+pub mod sysinfo;
 
 /// Dispatch the syscall described by the current frame's `rax`, leaving the
 /// return value in the frame's `rax`.
@@ -66,6 +67,7 @@ pub fn dispatch(frame: *mut IrqFrame) -> *mut IrqFrame {
         SYS_SLEEP => return process::sys_sleep(frame, a0),
         SYS_WAITPID => return process::sys_waitpid(frame, a0, a1),
         SYS_NET => crate::net::handle_syscall(a0),
+        SYS_SYSINFO => sysinfo::handle(a0, a1, a2),
         SYS_MMAP => ENOSYS as u64,
         SYS_MUNMAP => ENOSYS as u64,
 

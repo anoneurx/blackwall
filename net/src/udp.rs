@@ -105,6 +105,13 @@ pub struct UdpSocketPool {
     pub sockets: Vec<UdpSocket>,
 }
 
+/// Mirrors [`UdpSocketPool::new`], added for `clippy::new_without_default`.
+impl Default for UdpSocketPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UdpSocketPool {
     pub fn new() -> Self {
         Self { sockets: Vec::new() }
