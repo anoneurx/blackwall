@@ -218,7 +218,13 @@ impl FileSystem for RamFs {
             .position(|n| n.parent_inode == parent_inode && n.name == name)
             .ok_or(VfsError::FileNotFound)?;
         if nodes[idx].is_dir {
-            return Err(VfsError::IsADirectory);
+            // Removing a directory is allowed only when it is empty; report
+            // `DirectoryNotEmpty` instead of blanket `IsADirectory` rejection
+            // so empty-dir removal works through VFS rmdir().
+            let inode = nodes[idx].inode;
+            if nodes.iter().any(|n| n.parent_inode == inode) {
+                return Err(VfsError::DirectoryNotEmpty);
+            }
         }
         nodes.remove(idx);
         Ok(())

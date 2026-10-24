@@ -20,6 +20,7 @@ pub enum VfsError {
     NotSupported,
     AlreadyExists,
     OutOfInodes,
+    DirectoryNotEmpty,
 }
 
 // ── Vnode ────────────────────────────────────────────────────────────────────

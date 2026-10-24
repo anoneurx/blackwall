@@ -148,6 +148,7 @@ pub mod syscall {
     pub const ENOENT: i64 = -2;
     pub const EEXIST: i64 = -17;
     pub const ENOTDIR: i64 = -20;
+    pub const ENOTEMPTY: i64 = -39;
     pub const ENOTSUP: i64 = -95;
     pub const EAGAIN: i64 = -11;
     pub const EFAULT: i64 = -14;

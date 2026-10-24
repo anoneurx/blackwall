@@ -16,6 +16,7 @@ fn err_of(e: VfsError) -> u64 {
         VfsError::AlreadyExists => EEXIST,
         VfsError::NotADirectory => ENOTDIR,
         VfsError::NotSupported | VfsError::IsADirectory => ENOTSUP,
+        VfsError::DirectoryNotEmpty => ENOTEMPTY,
         _ => ENOSYS,
     };
     code as u64
