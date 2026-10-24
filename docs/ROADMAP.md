@@ -1,6 +1,6 @@
 # Black Wall — Roadmap
 
-Status: ACTIVE (Phase 0 complete). Living document. Updated for every change per CONTRIBUTING.md.
+Status: ACTIVE (Phase 0 complete, Phase 1 mostly complete). Living document. Updated for every change per CONTRIBUTING.md. Last verified by code-audit: 2026-10-24.
 
 ## Guiding Principles
 - Server-first, robotics/embedded later (ARM64/RISC-V)
@@ -17,29 +17,53 @@ Status: ACTIVE (Phase 0 complete). Living document. Updated for every change per
 - Syscall allow-list + user_access checks
 - `anx` stub added (Linux commands kept)
 
-## Phase 1: Stability & Tooling (P0) — IN PROGRESS
+## Phase 1: Stability & Tooling (P0) — MOSTLY COMPLETE (verified 2026-10-24)
 
-### 1.1 Fix first shell command "command not found" race [TODO]
-- Root cause: serial RX buffer/echo, PS/2 init race, newline/CRLF, or `read_line` consuming stray byte after banner/init
-- Repro: boot → type `ls` immediately → may return "command not found", then works
-- Fix: drain UART/PS2 on init, ignore leading CR/LF, flush buffers
-- Tests: regression in userspace/init (QEMU serial capture)
-- Acceptance: 10/10 cold boots → first command executes correctly
+### 1.1 Fix first shell command "command not found" race [FIX APPLIED]
+- Fix applied: init shell drains leading CR/LF after banner (first-byte check in `read_line`)
+- Regression test (10/10 cold-boot QEMU serial capture): NOT yet automated — pending
+- Acceptance: 10/10 cold boots → first command executes correctly (partially verified 2026-10-24, see QEMU CLI test notes in git history)
 
-### 1.2 Kernel logging with levels + boot args [TODO]
-- Levels: error|warn|info|debug|trace, compile-time default + runtime boot args (`log=debug`)
-- Replace ad-hoc prints with structured logger; quiet default
-- Acceptance: tunable verbosity, reduced default noise
+### 1.2 Kernel logging with levels + boot args [DONE]
+- `kernel/src/logging.rs`: levels error|warn|info|debug|trace, boot-arg parsing (`log=debug`)
+- Structured replaces ad-hoc prints in kernel init paths
 
-### 1.3 GitHub Actions CI [TODO]
-- Jobs: fmt, clippy (-D warnings), build (host+targets), `cargo test --workspace`, `cargo audit`, `cargo deny`, QEMU boot (serial output assertions) with isa-debug-exit, ISO artifact
-- Caching, required checks on PRs
-- Acceptance: green on main, blocks unbootable merges
+### 1.3 GitHub Actions CI [DONE, with caveat]
+- `.github/workflows/ci.yml`: fmt, clippy (-D warnings, host), builds (host + kernel/bootloader targets), `cargo test --workspace`, QEMU boot with serial assertion + isa-debug-exit, cargo audit/deny
+- Caveat: kernel/bootloader clippy and audit/deny run with `|| true` (non-blocking)
 
-### 1.4 Panic handler + backtraces + test harness [TODO]
-- Panic: backtrace, serial dump, defined policy; no silent infinite loop
-- In-kernel unit/integration + host tests; kernel test harness
-- Acceptance: useful traces; harness runs in CI
+### 1.4 Panic handler + backtraces + test harness [PARTIAL]
+- Panic: message + location + halt (`kernel/src/panic.rs`) — no backtrace/stack dump yet
+- In-kernel test harness: placeholder (`kernel/src/tests/mod.rs` = sanity_check); host tests: 155 test fns across workspace crates
 
-### Phase 2 Progress
-- 2.1: Added PAGE_COW flag; COW fork/mmap/guard pages in progress
+
+### Phase 2: Memory — GROUNDWORK (verified 2026-10-24)
+- 2.1 COW: `PAGE_COW` flag defined (`kernel/src/memory/paging.rs:22`); fault-path COW handling NOT implemented
+- 2.2 mmap/munmap: syscall numbers + dispatch entries exist (`kernel/src/syscall/mod.rs`); implementation is a stub on ENOSYS
+- 2.3 Memory hardening: pending
+- Remaining: COW fault handling in page-fault path, real mmap/munmap with VMA tracking, guard pages, heap hardening
+
+## Phase 3: Security — GROUNDWORK (verified 2026-10-24)
+- Threat model draft + SECURITY.md policy: done
+- SMEP/SMAP/NX/W^X: groundwork notes only; no CR4 enforcement paths in paging/interrupt entry
+
+## Phase 4: Performance & Tracing — PARTIAL
+- Per-CPU counters for syscalls/context switches wired; benchmarks doc is a placeholder
+
+## Phase 5: Userspace — PARTIAL
+- Boot shell: ~85 builtins wired; 7 print "not implemented" (cp/mv/ln/chmod/chown/passwd/resolve), `anx` in-shell is a stub
+- Host-side `bwsh`, coreutils (25), login, services: present in repo, not exercised by the QEMU boot test
+
+## Phase 6: OSS — ~90%
+- SECURITY.md, threat model, syscall reference, ARM64 port plan, PR/issue templates, CoC, CONTRIBUTING: done
+- Pending: `docs/v2_release_plan.md` was missing from the repo (created 2026-10-24); benchmarks data
+
+## Verification Log
+- 2026-10-24: full workspace + kernel/bootloader + init built clean (2 dead-code warnings in init, 1 in bw-pkg); ISO assembled (`bw-iso-builder`); QEMU boot + CLI driving via serial → see CHANGELOG "Verified" entry and commit history for results
+- 2026-10-24 QEMU CLI battery (TCG + `-serial stdio`, commands typed over serial):
+  - PASS: prompt ~3 s; first `ls` sent immediately after prompt executes correctly (race fix verified)
+  - PASS: pwd, echo (incl. `>` redirect), cat, mkdir/touch/rm (absolute), ls (root + subdir), cat of Ext2 `/mnt/hello.txt`, uname, whoami, hostname, help, `net state` (live stack info), unknown-command rejection, `exit` (task exits, status 0)
+  - PASS: honest stubs behave as documented (cp/mv → "not implemented in this shell build")
+  - BUG FOUND + FIXED: all relative paths (`mkdir testdir`, `touch testdir/f`, `echo > x`) failed — init's fs helpers bypassed `resolve_path()`; fixed in `userspace/init/src/main.rs` (`path_buf` now resolves)
+  - BUG FOUND + FIXED: `rmdir` of an empty directory returned `IsADirectory` — `VfsManager::rmdir` delegated to `unlink`, and RamFs refused dirs; added empty-dir removal to RamFs (`fs/src/ramfs.rs`), new `VfsError::DirectoryNotEmpty` + `ENOTEMPTY` mapping; 4 regression tests in `fs/tests/ramfs_rmdir_test.rs`
+  - KNOWN ISSUES (not fixed, small): `lspci` in shell says "(no PCI devices enumerated)" though boot enumerates 6; `date` returns 2026-01-01 00:00 (RTC time parsed at boot not propagated); `uptime` stuck at 00:00 (tick counter not read); shell `exit` doesn't trigger `isa-debug-exit` (QEMU keeps running)

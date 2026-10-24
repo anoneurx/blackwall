@@ -155,3 +155,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Phase 5: groundwork for POSIX libc, bwsh enhancements, anx hardening
 - Phase 6: issue/PR templates, CODE_OF_CONDUCT, syscall reference, ARM64 port plan
+- Docs: `STATUS.md` verified against code, `ROADMAP.md` per-phase completion audit,
+  missing `docs/v2_release_plan.md` created
+
+### Fixed (verified in QEMU serial battery, 2026-10-24)
+- CLI relative paths: fs helpers in the boot shell now resolve against the cwd
+  (previously `mkdir testdir`, `touch testdir/f`, `echo > testdir/f` all failed)
+- `rmdir` on empty directories: RamFs now removes empty dirs; non-empty dirs
+  return the new `VfsError::DirectoryNotEmpty` mapped to `ENOTEMPTY` (-39)
+- Regression tests: `fs/tests/ramfs_rmdir_test.rs` (4 tests; crate total 34 pass)
