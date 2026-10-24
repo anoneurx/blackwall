@@ -99,6 +99,13 @@ pub struct VfsManager {
     mounts: Vec<MountPoint>,
 }
 
+/// Mirrors [`VfsManager::new`], added for `clippy::new_without_default`.
+impl Default for VfsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VfsManager {
     pub fn new() -> Self {
         Self { mounts: Vec::new() }

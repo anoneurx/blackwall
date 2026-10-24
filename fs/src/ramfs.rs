@@ -48,6 +48,13 @@ pub struct RamFs {
 unsafe impl Send for RamFs {}
 unsafe impl Sync for RamFs {}
 
+/// Mirrors [`RamFs::new`], added for `clippy::new_without_default`.
+impl Default for RamFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RamFs {
     pub fn new() -> Self {
         let root = RamNode {
@@ -66,6 +73,11 @@ impl RamFs {
         unsafe { &*self.nodes.get() }
     }
 
+    // SAFETY: returns `&mut` from `&self` on purpose: the container holds a
+    // plain UnsafeCell and is always accessed through the kernel's SpinLock
+    // (see the `unsafe impl Sync` below). clippy::mut_from_ref is the
+    // accepted pattern for CPU-local interior accessors here.
+    #[allow(clippy::mut_from_ref)]
     fn nodes_mut(&self) -> &mut Vec<RamNode> {
         // SAFETY: caller holds the kernel SpinLock.
         unsafe { &mut *self.nodes.get() }
