@@ -105,11 +105,11 @@ fn syscall1(number: u64, a0: u64) -> u64 {
 // ── Filesystem helper wrappers ───────────────────────────────────────────────
 
 fn path_buf(path: &str) -> ([u8; 512], usize) {
-    let mut buf = [0u8; 512];
-    let copy_len = path.len().min(511);
-    buf[..copy_len].copy_from_slice(&path.as_bytes()[..copy_len]);
-    buf[copy_len] = 0;
-    (buf, copy_len)
+    // Resolve relative paths against the tracked cwd so every fs helper
+    // (open/mkdir/rm/rmdir/readdir) behaves like the cd/pwd builtins.
+    let resolved = resolve_path(path);
+    let len = resolved.iter().position(|&b| b == 0).unwrap_or(resolved.len());
+    (resolved, len)
 }
 
 fn open_file(path: &str, flags: u64) -> i64 {
