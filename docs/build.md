@@ -37,21 +37,54 @@ required**.
 
 ## Running under QEMU
 
-`cargo run -p blackwall-runner` automates build + ISO + QEMU, but its ISO
-step shells out to `xorriso`; where `xorriso` is unavailable use
-`bw-iso-builder` plus a direct QEMU invocation with OVMF:
+```sh
+cargo run -p blackwall-runner -- run
+```
+
+This builds everything, assembles the ISO, and opens a **graphical QEMU
+window**.  The interactive shell (`blackwall>`) lives on the serial
+console: switch to it from the QEMU window menu (**View → serial0**, or
+`Ctrl+Alt+2`).  `exit` / `poweroff` in the shell power the VM down.
+
+For scripted or CI use:
 
 ```sh
-cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/vars.fd   # writable variable store
-qemu-system-x86_64 -enable-kvm -machine q35 -m 256M \
+cargo run -p blackwall-runner -- run-headless   # serial on stdio
+cargo run -p blackwall-runner -- run --kvm      # opt-in acceleration
+```
+
+KVM is opt-in because the kernel's serial output is unreliable when the
+machine runs under KVM.
+
+Notes on firmware:
+
+* The ISO is **UEFI-only**.  `blackwall-runner` attaches OVMF (a
+  `pflash` code+vars pair when available, otherwise the combined
+  `OVMF.fd` via `-bios`).
+* The OVMF variable store is kept across runs in
+  `target/blackwall-ovmf-vars.fd` (like a real VM's NVRAM).  The **first**
+  boot with a fresh store may stop at the `Please select boot device`
+  firmware menu — pick the DVD entry (or just re-run once; the choice
+  persists).
+* Legacy BIOS (SeaBIOS) VMs will report "no bootable device"; select the
+  UEFI/OVMF firmware option in virt-manager (Overview → Firmware) or
+  VirtualBox (System → Enable EFI).
+
+Direct invocation (equivalent to what the runner does with a `pflash`
+pair):
+
+```sh
+cp /usr/share/OVMF/OVMF_VARS_4M.fd target/vars.fd   # writable variable store
+qemu-system-x86_64 -enable-kvm -machine q35 -m 512M \
   -display none -serial stdio -nic none -sandbox on \
   -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
-  -drive if=pflash,format=raw,unit=1,file=/tmp/vars.fd \
+  -drive if=pflash,format=raw,unit=1,file=target/vars.fd \
   -cdrom dist/blackwall-server-v0.1.iso
 ```
 
 Do not use `-bios` with the 4 MiB OVMF images; they must be attached as
-pflash units (code + writable vars copy).
+pflash units (code + writable vars copy).  The combined `OVMF.fd` image
+(`/usr/share/ovmf/OVMF.fd`) works fine with `-bios`.
 
 Expected serial output: the boot phases (memory, VFS, drivers, network) and a
 line announcing the userspace init hand-off, followed by the `blackwall>`

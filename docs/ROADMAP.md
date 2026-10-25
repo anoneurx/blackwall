@@ -71,3 +71,9 @@ Status: ACTIVE (Phase 0 complete, Phase 1 mostly complete). Living document. Upd
   - `date` reports the real wall-clock time from the RTC (e.g. `2026-10-24 21:00:03 UTC`).
   - `uptime` reports actual uptime (e.g. `0 days, 00:02` after ~2 min boot).
   - `exit` triggers `isa-debug-exit`, causing QEMU to terminate cleanly (no signal 15).
+- 2026-10-25 QEMU boot diagnostics (why VMs showed "no boot found"):
+  - Root cause 1: the ISO is UEFI-only (El Torito entries point at an EFI boot image `BOOT/EFIBOOT.IMG`; no BIOS/ISOLINUX entry). Legacy-BIOS (SeaBIOS) VMs report "no bootable device". virt-manager defaults to BIOS firmware for new x86 VMs → must switch Overview → Firmware to UEFI/OVMF.
+  - Root cause 2 (fixed): `tools/runner` hand-rolled xorriso call produced a non-bootable catalog (`-eltorito-alt-boot -e` with default 4-sector load size, no FAT ESP image) — `BdsDxe: No bootable option or device was found`. Fixed by delegating ISO build to `bw-iso-builder`; OVMF boots it via the standard `\EFI\BOOT\BOOTX64.EFI` fallback path.
+  - Root cause 3 (fixed): every runner run copied a fresh OVMF var store, halting at the `Please select boot device` menu; store is now persistent (`target/blackwall-ovmf-vars.fd`, copied once).
+  - measured: shell `exit` → qemu exits with status 1 (isa-debug-exit writes 0 → code value+1); runner now treats code 1 as clean powerdown.
+  - PASS (end-to-end): `target/debug/blackwall-runner run-headless` with piped `help`,`exit` → prompt appears, help output correct, clean powerdown (runner exit 0).

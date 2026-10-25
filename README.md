@@ -90,7 +90,8 @@ cd userspace/init && cargo build --target x86_64-unknown-none
 ### Building an ISO
 
 See `docs/build.md` and `tools/iso-builder` for assembling a bootable ISO,
-and `tools/runner` (QEMU) for running it.
+and `cargo run -p blackwall-runner -- run` for a one-command boot in a
+graphical QEMU window (or `run-headless` for a scripted serial session).
 
 ## Testing
 
