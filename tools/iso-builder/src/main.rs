@@ -267,9 +267,15 @@ fn main() -> Result<()> {
     println!("  {} ISO ready for installation!", "Done.".bold().bright_green());
     println!("  {}", cfg.output_iso.display().to_string().bright_cyan());
     println!();
-    println!("  To test in QEMU:");
-    println!("    qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd \\");
-    println!("      -cdrom {} -m 256M -serial stdio -display none", cfg.output_iso.display());
+    println!("  {} The ISO is UEFI-only: it boots on UEFI firmware (OVMF in QEMU,", "!".bright_yellow());
+    println!("  {} or the UEFI setting in virt-manager/VirtualBox/Boxes).", "!".bright_yellow());
+    println!("  {} Legacy BIOS (SeaBIOS) VMs and pre-2013 hardware will report", "!".bright_yellow());
+    println!("  {} \"no bootable device\".", "!".bright_yellow());
+    println!();
+    println!("  To run in QEMU (interactive window):");
+    println!("    cargo run -p blackwall-runner -- run");
+    println!("  Headless / scripted:");
+    println!("    cargo run -p blackwall-runner -- run-headless");
     println!();
 
     Ok(())
