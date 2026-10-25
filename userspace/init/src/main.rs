@@ -1281,11 +1281,11 @@ fn builtin_stat(cmd: &[u8]) {
 }
 
 fn builtin_chmod(_cmd: &[u8]) {
-    write_str("chmod: not implemented in this shell build\n");
+    write_str("chmod: changing file permissions not yet supported\n");
 }
 
 fn builtin_chown(_cmd: &[u8]) {
-    write_str("chown: not implemented in this shell build\n");
+    write_str("chown: changing file ownership not yet supported\n");
 }
 
 fn builtin_id(_cmd: &[u8]) {
@@ -1607,7 +1607,8 @@ fn builtin_umask(_cmd: &[u8]) {
 }
 
 fn builtin_passwd(_cmd: &[u8]) {
-    write_str("passwd: not implemented\n");
+    write_str("passwd: changing passwords not yet supported\n");
+    write_str("       use 'passwd' with a local password database when available\n");
 }
 
 fn builtin_su(_cmd: &[u8]) {
@@ -1647,7 +1648,7 @@ fn builtin_arp(cmd: &[u8]) {
 }
 
 fn builtin_resolve(_cmd: &[u8]) {
-    write_str("resolve: not implemented\n");
+    write_str("resolve: resolving hostname not yet supported\n");
 }
 
 fn builtin_clear(_cmd: &[u8]) {
